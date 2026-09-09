@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `wrangler dev`. Never commit the real file.
+# In production these are `wrangler secret put`, not vars.
+EINVOICE_APP_ID=
+EINVOICE_CARD_NO=
+EINVOICE_CARD_ENCRYPT=
+ANTHROPIC_API_KEY=
+SESSION_SECRET=
+OWNER_PASSWORD_HASH=

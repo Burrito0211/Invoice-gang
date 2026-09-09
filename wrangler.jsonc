@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "invoice-gang",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // 04:00 Taipei = 20:00 UTC. Once a day: the source updates on merchant
+  // filing lag measured in hours to days, so polling harder only burns quota.
+  "triggers": { "crons": ["0 20 * * *"] },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "invoice-gang",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  ],
+
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+
+  // Tunables. Secrets go through `wrangler secret put`, never here.
+  "vars": {
+    "SYNC_OVERLAP_DAYS": "7",
+    "SYNC_WINDOW_DAYS": "30",
+    "SYNC_HEADER_CALL_BUDGET": "6",
+    "DETAIL_BUDGET_PER_RUN": "200",
+    "LLM_BATCH_SIZE": "50",
+    "EINVOICE_BASE_URL": "https://api.einvoice.nat.gov.tw",
+    "EINVOICE_UUID": "invoice-gang"
+  }
+}
