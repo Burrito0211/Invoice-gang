@@ -5,9 +5,10 @@
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // 04:00 Taipei = 20:00 UTC. Once a day: the source updates on merchant
-  // filing lag measured in hours to days, so polling harder only burns quota.
-  "triggers": { "crons": ["0 20 * * *"] },
+  // Nothing is fetched on this schedule any more — see docs/IMPORT.md. The
+  // job checks how old the data is and nudges when it goes stale, which is
+  // the honest version of "runs without me". Every three days is plenty.
+  "triggers": { "crons": ["0 20 */3 * *"] },
 
   "d1_databases": [
     {
@@ -25,12 +26,6 @@
 
   // Tunables. Secrets go through `wrangler secret put`, never here.
   "vars": {
-    "SYNC_OVERLAP_DAYS": "7",
-    "SYNC_WINDOW_DAYS": "30",
-    "SYNC_HEADER_CALL_BUDGET": "6",
-    "DETAIL_BUDGET_PER_RUN": "200",
-    "LLM_BATCH_SIZE": "50",
-    "EINVOICE_BASE_URL": "https://api.einvoice.nat.gov.tw",
-    "EINVOICE_UUID": "invoice-gang"
+    "LLM_BATCH_SIZE": "50"
   }
 }

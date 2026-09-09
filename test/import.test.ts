@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { CsvFormatError, parseCarrierCsv, parseCsvLine } from '../src/import/csv.js';
 import { importCarrierCsv } from '../src/import/run.js';
+import { handleImportStatus } from '../src/api/status.js';
 import { fromApiDate } from '../src/lib/dates.js';
 import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
 
@@ -206,5 +207,32 @@ describe('importing', () => {
     const result = await importCarrierCsv('not,a,csv', deps(), options);
     expect(result.run.status).toBe('error');
     expect(result.run.error).toMatch(/missing column/);
+  });
+});
+
+describe('import status', () => {
+  it('never reports a negative age for an import that just ran', async () => {
+    // The first version derived "now" from midnight UTC of today's date, so an
+    // import an hour old was younger than the reference point and aged to -1.
+    await importCarrierCsv(CSV, deps(), options);
+
+    const response = await handleImportStatus(db, 1, clock(), 10);
+    const body = (await response.json()) as {
+      age_days: number | null;
+      stale: boolean;
+      covered_through: string | null;
+    };
+
+    expect(body.age_days).toBe(0);
+    expect(body.stale).toBe(false);
+    expect(body.covered_through).toBe('2026-09-04');
+  });
+
+  it('reports stale when nothing has ever been imported', async () => {
+    const response = await handleImportStatus(db, 1, clock(), 10);
+    const body = (await response.json()) as { age_days: number | null; stale: boolean };
+
+    expect(body.age_days).toBeNull();
+    expect(body.stale).toBe(true);
   });
 });

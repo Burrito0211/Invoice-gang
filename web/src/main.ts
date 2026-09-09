@@ -66,12 +66,13 @@ async function showApp(): Promise<void> {
       void renderDashboard();
     });
   }
-  $('sync').addEventListener('click', () => void triggerSync());
+  $('csv').addEventListener('change', (event) => void handleUpload(event));
   $('search').addEventListener('input', debounce(() => void runSearch(), 250));
   $('load-more').addEventListener('click', () => void loadInvoices(false));
   $('detail-close').addEventListener('click', () => $<HTMLDialogElement>('detail').close());
 
   await renderDashboard();
+  await renderStaleness();
 }
 
 function switchView(view: string): void {
@@ -101,7 +102,6 @@ async function renderDashboard(): Promise<void> {
   $('totals').innerHTML = [
     tile('Spent', money(byCategory.totals.invoice_total)),
     tile('Invoices', String(byCategory.totals.invoice_count)),
-    tile('Awaiting items', String(byCategory.totals.pending_details)),
     tile(
       'Uncategorized',
       itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal),
@@ -170,7 +170,6 @@ async function loadInvoices(reset: boolean): Promise<void> {
             (inv) => `<div class="row" data-inv="${escape(inv.inv_num)}">
               <span class="muted">${escape(inv.inv_date)}</span>
               <span class="grow">${escape(inv.seller_name ?? inv.inv_num)}</span>
-              ${inv.details_pending ? '<span class="tag">items pending</span>' : ''}
               <span class="amount">${escape(money(inv.amount))}</span>
             </div>`,
           )
@@ -317,19 +316,63 @@ async function renderStats(): Promise<void> {
     </div>`;
 }
 
-async function triggerSync(): Promise<void> {
-  const button = $<HTMLButtonElement>('sync');
-  button.disabled = true;
-  button.textContent = 'Syncing…';
+/**
+ * Import a carrier CSV export. The file is read in the browser and posted as
+ * text — the same endpoint the watch-folder script uses, so there is one
+ * import path and not two that drift apart.
+ */
+async function handleUpload(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const label = document.querySelector<HTMLLabelElement>('.upload');
+  const original = label?.textContent ?? 'Import CSV';
+  if (label) label.textContent = 'Importing…';
+
   try {
-    const { run } = await api.sync();
-    flash(`Run ${run.id}: ${run.status} — ${run.headers_new} new, ${run.items_new} items`);
+    const result = await api.importCsv(await file.text());
+    const run = result.run;
+    flash(
+      `${result.invoices_seen} invoices read — ${run.headers_new} new, ` +
+        `${run.items_new} items, ${run.llm_calls} model call(s)`,
+    );
+    if (result.masked_invoice_numbers.length > 0) {
+      flash(`${result.masked_invoice_numbers.length} invoice number(s) were masked by the export`);
+    }
     await renderDashboard();
+    await renderStaleness();
   } catch (err) {
-    flash(err instanceof ApiCallError ? err.message : 'sync failed');
+    flash(err instanceof ApiCallError ? err.message : 'import failed');
   } finally {
-    button.disabled = false;
-    button.textContent = 'Sync now';
+    if (label) label.textContent = original;
+    // Reset so re-selecting the same file fires `change` again.
+    input.value = '';
+  }
+}
+
+/**
+ * The failure mode of a manual-import system is silence: you stop importing,
+ * nothing errors, and the chart quietly stops moving. So how old the data is
+ * gets said out loud rather than buried on a stats tab.
+ */
+async function renderStaleness(): Promise<void> {
+  const banner = $('stale');
+  try {
+    const status = await api.importStatus();
+    if (!status.stale) {
+      banner.hidden = true;
+      return;
+    }
+    banner.innerHTML =
+      status.age_days === null
+        ? '<strong>No invoices imported yet.</strong> Export your carrier CSV and use Import CSV above.'
+        : `<strong>Data is ${status.age_days} days old.</strong> Covered through ${escape(
+            status.covered_through ?? 'nothing',
+          )} — export a fresh CSV and import it.`;
+    banner.hidden = false;
+  } catch {
+    banner.hidden = true; // a status failure must not break the dashboard
   }
 }
 

@@ -71,19 +71,24 @@ DELETE /api/categorize
 Removes an override and re-resolves the affected items back down the cascade.
 
 ```
-POST /api/sync
-  { "trigger": "manual", "window_days": 30, "detail_budget": 200 }
+POST /api/import
+  body: the carrier CSV export, as text/csv
 ```
-Runs the same code path as the cron. Returns the `sync_run` row. Reject a
-concurrent run — if a run started within the last 10 minutes and has no
-`finished_at`, return 409 rather than racing.
+Parses, stores and categorizes an export. Accepts the owner session cookie, or
+`Authorization: Bearer <IMPORT_TOKEN>` so the watch-folder script can upload
+without a login cookie. Returns the `sync_run` row plus the invoice count, any
+masked invoice numbers, and any skipped rows. A malformed file is a failed run
+with a reason, not a thrown error — status 422. Reject a concurrent run: if one
+started within the last 10 minutes and has no `finished_at`, return 409.
 
 ```
-GET /api/sync/status
+GET /api/import/status
 ```
-Last few `sync_run` rows and the current watermark. This is the "is it actually
-still working" page, and it is the first thing to build after the sync itself,
-because without it every failure is silent.
+Last few `sync_run` rows, the date the imports cover through, and how old the
+data is. This is the "is it actually still working" page, and it matters more
+than it did under a cron: the failure mode of a manual-import system is
+silence, so `stale` is part of the payload and the dashboard shows a banner
+for it.
 
 ## Conventions
 

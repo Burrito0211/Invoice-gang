@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { invoiceDigits, matchInvoice } from '../src/prizes/match.js';
-import { lastDrawnPeriod } from '../src/prizes/fetch.js';
-import { periodRange, previousPeriod, rocPeriodFor } from '../src/lib/dates.js';
+
+import { lastDrawnPeriod, periodRange, previousPeriod, rocPeriodFor } from '../src/lib/dates.js';
 import type { PrizeClass } from '../src/types.js';
 
 const winners: { prizeClass: PrizeClass; number: string }[] = [

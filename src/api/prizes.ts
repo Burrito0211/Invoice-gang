@@ -3,7 +3,7 @@
  * `prize_hit` rows against them.
  */
 import { getWinningNumbers, listPrizeHits } from '../db/queries.js';
-import { lastDrawnPeriod } from '../prizes/fetch.js';
+import { lastDrawnPeriod } from '../lib/dates.js';
 import { badRequest, json } from './respond.js';
 import type { IsoDate } from '../types.js';
 

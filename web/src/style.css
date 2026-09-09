@@ -305,3 +305,37 @@ td.num {
     width: 100%;
   }
 }
+
+/* ------------------------------------------------------------- import UI */
+
+/* A styled label standing in for the hidden file input. */
+.upload {
+  font: inherit;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.upload:hover {
+  filter: brightness(1.08);
+}
+
+/*
+ * The staleness banner. The failure mode of a manual-import system is
+ * silence — you stop importing and the chart quietly stops moving — so this
+ * is deliberately hard to miss.
+ */
+.banner {
+  padding: 0.7rem 1rem;
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.banner strong {
+  font-weight: 600;
+}

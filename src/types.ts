@@ -18,9 +18,8 @@ export interface Env {
   ASSETS?: Fetcher;
 
   // Secrets — `wrangler secret put`, never wrangler.jsonc, never the bundle.
-  EINVOICE_APP_ID: string;
+  /** Identifies the carrier row. Not a credential any more — nothing logs in. */
   EINVOICE_CARD_NO: string;
-  EINVOICE_CARD_ENCRYPT: string;
   ANTHROPIC_API_KEY: string;
   SESSION_SECRET: string;
   OWNER_PASSWORD_HASH: string;
@@ -30,19 +29,18 @@ export interface Env {
    * cookie-only — the token path never opens by accident.
    */
   IMPORT_TOKEN?: string;
+  /**
+   * Optional webhook the staleness and prize notifications POST to — ntfy,
+   * Discord, Slack, anything that accepts a plain-text body. Unset means log
+   * only, still visible through `wrangler tail`.
+   */
+  NOTIFY_WEBHOOK?: string;
 
   // Plain vars. Arrive as strings; parsed by loadConfig().
-  SYNC_OVERLAP_DAYS?: string;
-  SYNC_WINDOW_DAYS?: string;
-  SYNC_HEADER_CALL_BUDGET?: string;
-  DETAIL_BUDGET_PER_RUN?: string;
   LLM_BATCH_SIZE?: string;
-  EINVOICE_BASE_URL?: string;
-  EINVOICE_UUID?: string;
   /**
-   * `YYYY-MM-DD` the first sync should start from, stored as the carrier's
-   * `created_at`. Defaults to today, which means "no history" — set it back to
-   * backfill, since the window plan starts at the carrier's creation date.
+   * `YYYY-MM-DD` recorded as the carrier's creation date on first import.
+   * Cosmetic now — the export decides how much history arrives, not a window.
    */
   EINVOICE_CARRIER_SINCE?: string;
 }
@@ -57,16 +55,9 @@ export interface Carrier {
   created_at: Unix;
 }
 
-/** What the e-invoice client needs to authenticate. Never logged, never echoed. */
-export interface CarrierCredentials {
-  cardType: string;
-  cardNo: string;
-  cardEncrypt: string;
-}
-
 // ----------------------------------------------------------------- invoices
 
-/** A header as returned by `carrierInvChk`, already parsed and normalized. */
+/** An invoice header, parsed from the carrier CSV export. */
 export interface InvoiceHeader {
   invNum: string;
   invDate: IsoDate;
@@ -78,7 +69,7 @@ export interface InvoiceHeader {
   donatable: boolean;
 }
 
-/** A line item as returned by `carrierInvDetail`. */
+/** One line item from the carrier CSV export. */
 export interface InvoiceDetailRow {
   rowNum: number;
   description: string;
@@ -102,15 +93,6 @@ export interface InvoiceRow {
   detail_error: string | null;
   first_seen_at: Unix;
   updated_at: Unix;
-}
-
-/** One row of the detail queue — everything the detail call needs. */
-export interface PendingInvoice {
-  inv_num: string;
-  inv_date: IsoDate;
-  amount: number;
-  seller_name: string | null;
-  seller_ban: string | null;
 }
 
 export type CategorySource = 'override' | 'merchant' | 'cache' | 'llm' | 'none';
@@ -168,8 +150,3 @@ export interface SyncRunRow extends SyncRunTotals {
 
 export type PrizeClass = 'special' | 'grand' | 'first' | 'additional';
 
-export interface WinningNumbers {
-  invPeriod: string;
-  /** Every published number for the period, tagged with its class. */
-  numbers: { prizeClass: PrizeClass; number: string }[];
-}

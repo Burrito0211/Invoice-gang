@@ -17,7 +17,6 @@ import type {
   InvoiceRow,
   IsoDate,
   ItemRow,
-  PendingInvoice,
   PrizeClass,
   SyncRunRow,
   SyncStatus,
@@ -57,9 +56,9 @@ export async function insertCarrier(
  * Header upsert. On conflict this updates `inv_status`, `amount`,
  * `seller_name`, `updated_at` and nothing else.
  *
- * The exclusions are the load-bearing part: leaving `detail_fetched_at` and
- * `first_seen_at` alone is what stops the overlap re-scan from re-queueing
- * details for every invoice in the window on every single run.
+ * The exclusions are the load-bearing part: leaving `first_seen_at` alone is
+ * what keeps re-importing an overlapping export harmless, and it is how the
+ * caller tells a genuinely new invoice from one it has already seen.
  *
  * Returns whether the row was new, inferred from `first_seen_at` still being
  * the timestamp this run supplied.
@@ -117,31 +116,6 @@ export function countNewHeaders(results: D1Result<{ first_seen_at: Unix }>[], no
   return count;
 }
 
-/**
- * The detail queue. It is not a table — it is this query. A NULL
- * `detail_fetched_at` means still queued; newest first, because recent
- * spending is what the dashboard gets asked about and a year-long backfill
- * should not delay this month's data.
- */
-export async function selectPendingDetails(
-  db: D1Database,
-  limit: number,
-  maxAttempts = 5,
-): Promise<PendingInvoice[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT inv_num, inv_date, amount, seller_name, seller_ban
-       FROM invoice
-       WHERE detail_fetched_at IS NULL
-         AND detail_attempts < ?
-       ORDER BY inv_date DESC, inv_num DESC
-       LIMIT ?`,
-    )
-    .bind(maxAttempts, limit)
-    .all<PendingInvoice>();
-  return results ?? [];
-}
-
 export async function markDetailFetched(db: D1Database, invNum: string, now: Unix): Promise<void> {
   await db
     .prepare(
@@ -150,28 +124,6 @@ export async function markDetailFetched(db: D1Database, invNum: string, now: Uni
        WHERE inv_num = ?`,
     )
     .bind(now, now, invNum)
-    .run();
-}
-
-/**
- * A failed — or empty — detail fetch. Deliberately does not set
- * `detail_fetched_at`: details can lag behind headers, so marking an empty
- * response complete would make the miss permanent. The attempt counter is
- * what stops a genuinely empty invoice from being retried forever.
- */
-export async function recordDetailAttempt(
-  db: D1Database,
-  invNum: string,
-  error: string | null,
-  now: Unix,
-): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE invoice
-       SET detail_attempts = detail_attempts + 1, detail_error = ?, updated_at = ?
-       WHERE inv_num = ?`,
-    )
-    .bind(error, now, invNum)
     .run();
 }
 
@@ -250,8 +202,8 @@ export async function listInvoices(
 
 /**
  * Item insert. `INSERT OR IGNORE` against `UNIQUE (inv_num, row_num)` is what
- * makes a detail re-fetch idempotent — the uniqueness is enforced structurally
- * rather than by reading before writing, which would race with itself.
+ * makes re-importing an export idempotent — the uniqueness is enforced
+ * structurally rather than by reading before writing.
  *
  * `RETURNING id` yields no row when the insert was ignored, so the caller
  * learns which items are genuinely new without a second query.

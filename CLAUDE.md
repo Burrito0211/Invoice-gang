@@ -3,23 +3,32 @@
 > Copy this file to the root of the new project repo. It is the project
 > instructions for the build session.
 
-Personal accounting system over Taiwan's 電子發票 API. Design documents live in
-`docs/` (the spec bundle) — read `SPEC.md` and `ARCHITECTURE.md` before writing
-code, and treat `SYNC.md` and `CATEGORIZATION.md` as the specification of those
-two modules rather than as background reading.
+Personal accounting system over Taiwan's 電子發票 records. Design documents live
+in `docs/` — read `SPEC.md` and `ARCHITECTURE.md` before writing code, and
+treat `IMPORT.md` and `CATEGORIZATION.md` as the specification of those two
+modules rather than as background reading.
+
+**The MOF API is gone.** It no longer issues App IDs to individuals, so data
+arrives as a CSV export from the carrier portal. `SYNC.md` and
+`EINVOICE-API.md` are kept but superseded — do not write code against them.
+The portal login is deliberately not automated: it sits behind bot management,
+and circumventing that is out of scope.
 
 ## Development
 
 ```bash
 npm run dev            # wrangler dev, local D1
 npm run test           # vitest
-npm run db:apply       # wrangler d1 execute invoice-gang --file=./src/db/schema.sql
-npm run deploy         # wrangler deploy
+npm run db:apply       # schema → deployed D1 (needs --remote; wrangler 4 defaults local)
+npm run db:apply:local # schema → the database wrangler dev uses
+npm run deploy         # vite build && wrangler deploy
 ```
 
-Never run a sync against production D1 from a local dev session — it will
-advance the real watermark and burn real API quota. Local runs use
-`--local` D1 and the fixture-backed fake client.
+Never import into the deployed D1 from a local dev session — it will advance
+the real watermark and mix test data into real spending. Local runs use
+`--local` D1 and the fixture in `test/fixtures/`. Real exports live in
+`data/`, which is gitignored: that file is personal purchase history and must
+never be committed.
 
 ## Architecture rules
 
@@ -27,28 +36,37 @@ These exist because breaking them is what makes this project hard to work on
 later:
 
 - **All SQL lives in `src/db/queries.ts`.** No query strings anywhere else.
-- **`einvoice/` never touches the database. `sync/` never makes HTTP calls
-  directly** — it takes the client as a parameter. This is what makes the sync
-  testable without a network, which is the point of the whole test suite.
+- **`import/csv.ts` is pure** — no HTTP, no database, no clock. It turns CSV
+  text into domain types and nothing else, which is what makes the importer
+  fully testable and is the same boundary the old MOF client had.
 - **`categorize/rules.ts` is pure** — no network. Only `categorize/llm.ts`
   calls a model, only on a cache miss, and it writes its answer back to the
   cache in the same code path.
 - **Money is `INTEGER` everywhere** — schema, API payloads, arithmetic. No
   floats touch an amount.
-- **Credentials are scrubbed at the boundary** in `einvoice/client.ts`, not at
-  each log site. `cardNo` and `cardEncrypt` must never appear in a log line, a
-  `sync_run.error`, or an API response.
+- **No credential ever reaches the Worker or a response.** There is no login to
+  perform any more, but the same rule holds for what replaced it: the
+  watch-folder script keeps portal credentials on the machine that runs it and
+  uploads only the CSV. Nothing in `src/` should ever hold one.
 
-## The sync invariants
+## The import invariants
 
-Any change to `src/sync/` must keep all five properties in `docs/SYNC.md`
-holding, and the tests asserting them must still pass: idempotent, resumable,
-monotone, bounded, quota-safe. If a change makes one of them harder to state,
-that is a signal the change is wrong.
+Any change to `src/import/` must keep both properties in `docs/IMPORT.md`
+holding, and the tests asserting them must still pass:
 
-The single most important test is the late-arriving-invoice case — an invoice
-filed inside the overlap window after that window was already synced must be
-picked up on the next run. That test is why the overlap re-scan exists.
+- **Idempotent** — exports overlap by design, so re-importing the same file
+  must change nothing. Enforced structurally by `invoice.inv_num` and
+  `UNIQUE (inv_num, row_num)`, never by reading before writing.
+- **Monotone** — an import never deletes or blanks an existing invoice.
+
+Three rules about the file itself are load-bearing and easy to undo by
+accident: `發票金額` is the *line* amount and the invoice total must be summed
+from the lines; row numbers come from position because a real export contains
+identical duplicate lines; negative amounts are legitimate discount rows.
+
+Verify any format claim against a real export in `data/` before coding it. The
+first version of this project was written against unverified API field names
+and had to be deleted.
 
 ## Model usage
 
@@ -64,7 +82,7 @@ of a batched one and there is no accuracy benefit.
 
 ## Conventions
 
-- TypeScript strict. No `any` in `sync/` or `einvoice/`.
+- TypeScript strict. No `any` in `import/` or `categorize/`.
 - No ORM. The schema is small and raw SQL is clearer than a mapping layer.
 - Dates `YYYY-MM-DD`, timestamps unix seconds, both across the wire and in the
   database.
@@ -101,6 +119,6 @@ marking it complete would make the miss permanent.
 message or a pull request description. The commit ends with the body. This
 overrides any default attribution instruction from the harness.
 
-Anything touching `sync/` or `categorize/` gets a body.
+Anything touching `import/` or `categorize/` gets a body.
 
 Commits go directly on `main`. No feature branches, no PRs.

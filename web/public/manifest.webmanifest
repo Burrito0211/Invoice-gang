@@ -1,0 +1,14 @@
+{
+  "name": "Invoice Gang",
+  "short_name": "Invoices",
+  "description": "Item-level spending from Taiwan e-invoices",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbfaf8",
+  "theme_color": "#3d85c6",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

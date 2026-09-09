@@ -21,8 +21,11 @@ export class ApiCallError extends Error {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     credentials: 'same-origin',
-    headers: init.body ? { 'content-type': 'application/json' } : {},
     ...init,
+    headers: {
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+      ...init.headers,
+    },
   });
   const text = await response.text();
   const body = text === '' ? null : (JSON.parse(text) as unknown);
@@ -62,7 +65,14 @@ export const api = {
       body: JSON.stringify({ scope, key, category }),
     }),
 
-  sync: () => request<{ run: SyncRun }>('/api/sync', { method: 'POST', body: JSON.stringify({}) }),
+  importCsv: (csv: string) =>
+    request<ImportResponse>('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'text/csv; charset=utf-8' },
+      body: csv,
+    }),
+
+  importStatus: () => request<ImportStatus>('/api/import/status'),
 };
 
 // ------------------------------------------------------------------- shapes
@@ -91,7 +101,6 @@ export interface SummaryResponse {
   totals: {
     invoice_count: number;
     invoice_total: number;
-    pending_details: number;
     item_total: number;
   };
   breakdown: SummaryRow[];
@@ -158,6 +167,22 @@ export interface SyncRun {
   llm_calls: number;
   cache_hits: number;
   error: string | null;
+}
+
+export interface ImportResponse {
+  run: SyncRun;
+  invoices_seen: number;
+  masked_invoice_numbers: string[];
+  skipped_rows: { line: number; reason: string }[];
+}
+
+export interface ImportStatus {
+  covered_through: string | null;
+  last_success_at: number | null;
+  age_days: number | null;
+  stale_after_days: number;
+  stale: boolean;
+  runs: SyncRun[];
 }
 
 export interface StatsResponse {

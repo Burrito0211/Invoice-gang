@@ -14,7 +14,9 @@
     "db:apply:local": "wrangler d1 execute invoice-gang --local --file=./src/db/schema.sql",
     "db:seed:local": "wrangler d1 execute invoice-gang --local --file=./src/db/seed.sql",
     "deploy": "npm run build && wrangler deploy",
-    "hash-password": "node scripts/hash-password.mjs"
+    "hash-password": "node scripts/hash-password.mjs",
+    "watch": "node scripts/watch-folder.mjs",
+    "watch:once": "node scripts/watch-folder.mjs --once"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260908.1",

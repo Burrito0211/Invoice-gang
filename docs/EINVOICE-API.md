@@ -1,5 +1,12 @@
 # EINVOICE-API — 財政部電子發票整合服務平台
 
+> **Superseded.** The MOF stopped issuing App IDs to individual developers,
+> so the API this document describes is not reachable. Invoice data now
+> arrives through a CSV export — see [`IMPORT.md`](IMPORT.md). This file is
+> kept because the reasoning in it still explains the schema, and because the
+> constraints it describes were real.
+
+
 > **Read this warning first.** Nothing below was tested against the live API
 > while writing this bundle. Claims are tagged **[verified]** where they are
 > stable, publicly documented facts, and **[assumed]** where the exact spelling

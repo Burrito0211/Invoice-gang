@@ -104,6 +104,21 @@ export function periodRange(period: string): { start: IsoDate; end: IsoDate } {
   return { start, end };
 }
 
+/**
+ * The most recent period whose draw has already happened.
+ *
+ * Numbers for a period are published on the 25th of the month after it
+ * closes, so before that date the newest period with published numbers is the
+ * one before it.
+ */
+export function lastDrawnPeriod(today: IsoDate): string {
+  const previous = previousPeriod(rocPeriodFor(today));
+  const day = Number(today.slice(8, 10));
+  const month = Number(today.slice(5, 7));
+  const drawHappened = month % 2 === 1 && day >= 25;
+  return drawHappened ? previous : previousPeriod(previous);
+}
+
 /** The period before the one containing `date`. */
 export function previousPeriod(period: string): string {
   const year = Number(period.slice(0, 3));

@@ -1,22 +1,28 @@
 /**
  * The two entry points. One Worker script:
  *
- *   `scheduled()` — the cron trigger. The "runs without me" requirement, and
- *                   the single feature that separates this project from a
- *                   client-side toy.
+ *   `scheduled()` — the cron trigger. It no longer fetches anything, because
+ *                   there is nothing left to fetch: the MOF closed its API to
+ *                   individuals and the export portal sits behind bot
+ *                   management. What it does instead is watch for staleness
+ *                   and say so, which is the honest version of "runs without
+ *                   me" — it remembers so you do not have to.
  *   `fetch()`     — `/api/*` plus the static dashboard.
  *
- * They share every module. The sync can also be invoked over HTTP by the
- * owner, which is what makes manual runs and local development the same code
- * path as the nightly job rather than a second one that rots.
+ * Invoice data arrives through `POST /api/import`, from the dashboard's
+ * upload or from the local watch-folder script. See docs/IMPORT.md.
  */
-import { EInvoiceClient } from './einvoice/client.js';
-import { checkPrizes } from './prizes/fetch.js';
-import { runSync } from './sync/run.js';
-import { getCarrierByCardNo, insertCarrier } from './db/queries.js';
+import { checkPrizes } from './prizes/check.js';
+import {
+  getCarrierByCardNo,
+  getSyncState,
+  insertCarrier,
+  listSyncRuns,
+} from './db/queries.js';
 import { CLASSIFIER_MODEL } from './categorize/llm.js';
-import { loadConfig, requireAuthSecrets, requireSyncSecrets } from './lib/config.js';
+import { loadConfig, requireAuthSecrets } from './lib/config.js';
 import { isIsoDate, isoToUnix, toIsoDate } from './lib/dates.js';
+import type { ClassifyOptions } from './categorize/llm.js';
 import {
   clearCookie,
   createSession,
@@ -39,10 +45,12 @@ import { handleItems } from './api/items.js';
 import { handlePrizes } from './api/prizes.js';
 import { handleStats } from './api/stats.js';
 import { handleSummary } from './api/summary.js';
-import { handleSyncStatus, handleSyncTrigger } from './api/sync.js';
+import { handleImportStatus } from './api/status.js';
 import { ApiError, errorResponse, json } from './api/respond.js';
 import type { Env } from './types.js';
-import type { RunSyncDeps } from './sync/run.js';
+
+/** Data older than this is stale enough to be worth a nudge. */
+const STALE_AFTER_DAYS = 10;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -69,7 +77,7 @@ async function route(
   url: URL,
   _ctx: ExecutionContext,
 ): Promise<Response> {
-  const now = Math.floor(Date.now() / 1000);
+  const now = unixNow();
   const today = toIsoDate(now);
   const path = url.pathname;
 
@@ -82,11 +90,9 @@ async function route(
       throw new ApiError(401, 'bad_credentials', 'wrong password');
     }
     const token = await createSession(env.SESSION_SECRET, now);
-    return json(
-      { ok: true },
-      200,
-      { 'set-cookie': sessionCookie(token, url.protocol === 'https:') },
-    );
+    return json({ ok: true }, 200, {
+      'set-cookie': sessionCookie(token, url.protocol === 'https:'),
+    });
   }
 
   if (path === '/api/logout' && request.method === 'POST') {
@@ -98,10 +104,10 @@ async function route(
     return json({ authenticated: ok });
   }
 
-  // Import is the one route a machine can authenticate to: the local crawler
-  // carries a bearer token rather than a session cookie. It still falls back
-  // to the owner session, which is how a file dragged into the dashboard
-  // arrives.
+  // Import is the one route a machine can authenticate to: the watch-folder
+  // script carries a bearer token rather than a session cookie. It still
+  // falls back to the owner session, which is how a file dragged into the
+  // dashboard arrives.
   if (path === '/api/import' && request.method === 'POST') {
     if (!hasImportToken(request, env)) await requireOwner(request, env, now);
     await ensureCarrier(env, now);
@@ -125,12 +131,12 @@ async function route(
   if (path === '/api/overrides') return handleListOverrides(env.DB);
   if (path === '/api/prizes') return handlePrizes(env.DB, url, today);
 
-  if (path === '/api/stats' || path === '/api/sync/status') {
+  if (path === '/api/stats' || path === '/api/import/status') {
     const carrier = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO ?? '');
     const carrierId = carrier?.id ?? 0;
     return path === '/api/stats'
       ? handleStats(env.DB, carrierId)
-      : handleSyncStatus(env.DB, carrierId);
+      : handleImportStatus(env.DB, carrierId, now, STALE_AFTER_DAYS);
   }
 
   // ----------------------------------------------------------------- write
@@ -139,70 +145,78 @@ async function route(
     if (request.method === 'DELETE') return handleDeleteOverride(env.DB, env.CACHE, request);
   }
 
-  if (path === '/api/sync' && request.method === 'POST') {
-    requireSyncSecrets(env);
-    const config = loadConfig(env);
-    await ensureCarrier(env, now);
-    return handleSyncTrigger(
-      request,
-      buildSyncDeps(env),
-      {
-        cardNo: env.EINVOICE_CARD_NO,
-        overlapDays: config.overlapDays,
-        windowDays: config.windowDays,
-        headerCallBudget: config.headerCallBudget,
-        detailBudget: config.detailBudgetPerRun,
-      },
-      now,
-    );
-  }
-
   throw new ApiError(404, 'not_found', `no route for ${request.method} ${path}`);
 }
 
 // --------------------------------------------------------------------- cron
 
+/**
+ * The watchdog. There is no data source to poll, so the job checks how old
+ * the data is and notifies when it has gone stale, then re-checks prizes in
+ * case winning numbers were recorded since the last run.
+ *
+ * Without this, the failure mode of a manual-import system is silence: you
+ * simply stop importing and never notice the chart stopped moving.
+ */
 async function cronRun(env: Env): Promise<void> {
-  // Validate before the first HTTP call: a nightly job that runs with a
-  // missing secret does not fail, it silently syncs nothing.
-  requireSyncSecrets(env);
-  const config = loadConfig(env);
-  const now = Math.floor(Date.now() / 1000);
-  await ensureCarrier(env, now);
+  const now = unixNow();
+  const carrier = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO ?? '');
+  if (!carrier) {
+    console.warn('no carrier row yet — import once to create it');
+    return;
+  }
 
-  const deps = buildSyncDeps(env);
-  const run = await runSync(deps, {
-    trigger: 'cron',
-    cardNo: env.EINVOICE_CARD_NO,
-    overlapDays: config.overlapDays,
-    windowDays: config.windowDays,
-    headerCallBudget: config.headerCallBudget,
-    detailBudget: config.detailBudgetPerRun,
-  });
-  console.log(`sync run ${run.id}: ${run.status}`, {
-    headers_new: run.headers_new,
-    details_fetched: run.details_fetched,
-    items_new: run.items_new,
-    llm_calls: run.llm_calls,
-    cache_hits: run.cache_hits,
+  const state = await getSyncState(env.DB, carrier.id);
+  const lastSuccess = state?.last_success_at ?? null;
+  const ageDays =
+    lastSuccess === null ? Infinity : Math.floor((now - lastSuccess) / 86400);
+
+  if (ageDays >= STALE_AFTER_DAYS) {
+    await notify(
+      env,
+      lastSuccess === null
+        ? 'Invoice Gang has never imported anything — export your carrier CSV and upload it.'
+        : `Invoice data is ${ageDays} days old. Export a fresh carrier CSV and upload it.`,
+    );
+  }
+
+  const runs = await listSyncRuns(env.DB, 1);
+  console.log('staleness check', {
+    synced_through: state?.synced_through ?? null,
+    age_days: ageDays === Infinity ? null : ageDays,
+    last_run_status: runs[0]?.status ?? null,
   });
 
-  // Prizes are cheap and only worth doing occasionally — the numbers change
-  // six times a year, and `checkPrizes` no-ops once the period is cached.
+  // Cheap, and it costs nothing when no numbers have been recorded.
   try {
     const prizes = await checkPrizes({
-      api: deps.api,
       db: env.DB,
-      now: deps.now,
-      notify: (message) => {
-        console.log(message);
-        return Promise.resolve();
-      },
+      now: unixNow,
+      notify: (message) => notify(env, message),
     });
     if (prizes.hits > 0) console.log(`prize check ${prizes.invPeriod}: ${prizes.hits} hit(s)`);
   } catch (err) {
-    // A prize check failing must never take the sync's result with it.
+    // A prize check failing must never take the staleness check with it.
     console.error('prize check failed', err);
+  }
+}
+
+/**
+ * Notification is a webhook so the channel is the owner's choice — ntfy,
+ * Discord, Slack, whatever accepts a POST. Unset means log only, which is
+ * still visible in `wrangler tail`.
+ */
+async function notify(env: Env, message: string): Promise<void> {
+  console.log(message);
+  if (!env.NOTIFY_WEBHOOK) return;
+  try {
+    await fetch(env.NOTIFY_WEBHOOK, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+      body: message,
+    });
+  } catch (err) {
+    console.error('notification failed', err);
   }
 }
 
@@ -213,46 +227,25 @@ export function unixNow(): number {
 }
 
 /**
- * The model half of the categorization pipeline. No key means the run does
+ * The model half of the categorization pipeline. No key means an import does
  * everything except step 5 of the cascade rather than failing —
  * categorization never blocks an import.
  */
-function buildLlm(env: Env): RunSyncDeps['llm'] {
+function buildLlm(env: Env): ClassifyOptions | null {
   const config = loadConfig(env);
   return env.ANTHROPIC_API_KEY
     ? { apiKey: env.ANTHROPIC_API_KEY, batchSize: config.llmBatchSize, model: CLASSIFIER_MODEL }
     : null;
 }
 
-function buildSyncDeps(env: Env): RunSyncDeps {
-  const config = loadConfig(env);
-  return {
-    api: new EInvoiceClient({
-      baseUrl: config.baseUrl,
-      appId: env.EINVOICE_APP_ID,
-      uuid: config.uuid,
-      credentials: {
-        cardType: '3J0002',
-        cardNo: env.EINVOICE_CARD_NO,
-        cardEncrypt: env.EINVOICE_CARD_ENCRYPT,
-      },
-    }),
-    db: env.DB,
-    kv: env.CACHE,
-    now: () => Math.floor(Date.now() / 1000),
-    llm: buildLlm(env),
-  };
-}
-
 /**
- * One carrier in v1, created on first use from the configured secret.
- *
- * `created_at` is where the very first sync window starts, so it decides how
- * much history gets pulled. It defaults to today — set `EINVOICE_CARRIER_SINCE`
- * to backfill instead, and let the run budget spread it over several nights.
+ * One carrier in v1, created on first use. `created_at` no longer decides how
+ * much history is pulled — the export decides that — so it is only a record
+ * of when the carrier was first seen.
  */
 async function ensureCarrier(env: Env, now: number): Promise<void> {
-  const existing = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO);
+  const cardNo = env.EINVOICE_CARD_NO ?? 'default';
+  const existing = await getCarrierByCardNo(env.DB, cardNo);
   if (existing) return;
 
   const since = env.EINVOICE_CARRIER_SINCE;
@@ -260,7 +253,7 @@ async function ensureCarrier(env: Env, now: number): Promise<void> {
 
   await insertCarrier(env.DB, {
     cardType: '3J0002',
-    cardNo: env.EINVOICE_CARD_NO,
+    cardNo,
     label: 'owner',
     createdAt,
   });

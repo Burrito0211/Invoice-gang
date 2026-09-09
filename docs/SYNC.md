@@ -1,5 +1,12 @@
 # SYNC
 
+> **Superseded.** The MOF stopped issuing App IDs to individual developers,
+> so the API this document describes is not reachable. Invoice data now
+> arrives through a CSV export — see [`IMPORT.md`](IMPORT.md). This file is
+> kept because the reasoning in it still explains the schema, and because the
+> constraints it describes were real.
+
+
 The core of the project. Everything else is a view over what this produces.
 
 ## The two problems

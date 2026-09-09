@@ -38,7 +38,6 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
     totals: {
       invoice_count: totals?.invoice_count ?? 0,
       invoice_total: totals?.invoice_total ?? 0,
-      pending_details: totals?.pending_details ?? 0,
       item_total: breakdown.reduce((sum, row) => sum + Number(row.total ?? 0), 0),
     },
     breakdown,
