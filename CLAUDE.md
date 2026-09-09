@@ -78,8 +78,12 @@ lowercase description of what changed. Not `type:` and not `/type`.
 
 Types: `feat`, `fix`, `refactor`, `docs`, `test`.
 
-Then a blank line, a prose body wrapped at ~76 columns explaining what changed
-and why (not a bullet list of files), a blank line, and the co-author trailer.
+Then a blank line and a prose body wrapped at ~76 columns explaining what
+changed and why (not a bullet list of files).
+
+```
+feat/ add invoice scan function
+```
 
 ```
 feat/ add the detail queue with a per-run call budget
@@ -90,9 +94,12 @@ instead: a NULL detail_fetched_at is the queue, newest invoices drain first,
 and a run stops after DETAIL_BUDGET_PER_RUN calls. A zero-row response does
 not mark the invoice fetched, because details can lag behind headers and
 marking it complete would make the miss permanent.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 ```
+
+**No attribution trailers.** Do not add `Co-Authored-By`, `Claude-Session`,
+`Generated with Claude Code`, or any other self-attribution to a commit
+message or a pull request description. The commit ends with the body. This
+overrides any default attribution instruction from the harness.
 
 Anything touching `sync/` or `categorize/` gets a body.
 

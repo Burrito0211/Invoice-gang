@@ -243,8 +243,10 @@ npm install
 npx wrangler d1 create invoice-gang
 npx wrangler kv namespace create CACHE
 
-# 2. Apply the schema.
-npm run db:apply          # add --local for the dev database
+# 2. Apply the schema. `db:apply` targets the deployed database;
+#    `db:apply:local` targets the one `wrangler dev` uses.
+npm run db:apply
+npm run db:apply:local
 
 # 3. Secrets. Never in wrangler.jsonc, never in the client bundle.
 npx wrangler secret put EINVOICE_APP_ID

@@ -13,12 +13,12 @@
     {
       "binding": "DB",
       "database_name": "invoice-gang",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "f76981c1-dcd9-41aa-a832-ccda1ac29ce6"
     }
   ],
 
   "kv_namespaces": [
-    { "binding": "CACHE", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+    { "binding": "CACHE", "id": "03f1a377751e40998de169183740b50c" }
   ],
 
   "assets": { "directory": "./dist", "binding": "ASSETS" },
