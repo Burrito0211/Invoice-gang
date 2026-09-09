@@ -24,6 +24,12 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   SESSION_SECRET: string;
   OWNER_PASSWORD_HASH: string;
+  /**
+   * Optional. When set, enables bearer-token auth on `POST /api/import` so
+   * the local crawler can upload without a login cookie. Absent means
+   * cookie-only — the token path never opens by accident.
+   */
+  IMPORT_TOKEN?: string;
 
   // Plain vars. Arrive as strings; parsed by loadConfig().
   SYNC_OVERLAP_DAYS?: string;

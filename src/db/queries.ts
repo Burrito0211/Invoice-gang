@@ -102,6 +102,10 @@ export function upsertInvoiceHeaderStatement(
  * Count the rows a batched header upsert actually created. `first_seen_at` is
  * only ever written on insert, so a row still carrying this run's timestamp is
  * a row that did not exist before it.
+ *
+ * This assumes `now` never repeats a value an earlier run already used — true
+ * of any real clock, but it does mean a caller must not feed the sync a
+ * restarting or frozen clock, or existing rows will be counted as new.
  */
 export function countNewHeaders(results: D1Result<{ first_seen_at: Unix }>[], now: Unix): number {
   let count = 0;

@@ -4,3 +4,6 @@ dist/
 .dev.vars
 *.local
 .DS_Store
+
+# Real invoice exports — personal purchase history, never committed.
+data/

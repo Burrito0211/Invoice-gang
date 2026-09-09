@@ -55,6 +55,12 @@ export function fromApiDate(value: string): IsoDate | null {
   const western = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
   if (western) return pad(Number(western[1]), Number(western[2]), Number(western[3]));
 
+  // `20260904` — the packed form the carrier CSV export uses.
+  const westernPacked = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (westernPacked) {
+    return pad(Number(westernPacked[1]), Number(westernPacked[2]), Number(westernPacked[3]));
+  }
+
   const rocSlash = s.match(/^(\d{2,3})[/-](\d{1,2})[/-](\d{1,2})$/);
   if (rocSlash) {
     return pad(Number(rocSlash[1]) + 1911, Number(rocSlash[2]), Number(rocSlash[3]));

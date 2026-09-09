@@ -26,6 +26,7 @@ import {
   verifyPassword,
   verifySession,
 } from './api/auth.js';
+import { handleImport, hasImportToken } from './api/import.js';
 import {
   handleCreateOverride,
   handleDeleteOverride,
@@ -95,6 +96,19 @@ async function route(
   if (path === '/api/session' && request.method === 'GET') {
     const ok = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
     return json({ authenticated: ok });
+  }
+
+  // Import is the one route a machine can authenticate to: the local crawler
+  // carries a bearer token rather than a session cookie. It still falls back
+  // to the owner session, which is how a file dragged into the dashboard
+  // arrives.
+  if (path === '/api/import' && request.method === 'POST') {
+    if (!hasImportToken(request, env)) await requireOwner(request, env, now);
+    await ensureCarrier(env, now);
+    // A real advancing clock, not the request's fixed `now`: newness is
+    // inferred from `first_seen_at == now`, and a frozen clock would make
+    // every re-imported row look new.
+    return handleImport(request, env, { now: unixNow, llm: buildLlm(env) }, now);
   }
 
   // Everything past this point is the owner's.
@@ -194,6 +208,22 @@ async function cronRun(env: Env): Promise<void> {
 
 // ------------------------------------------------------------------ wiring
 
+export function unixNow(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * The model half of the categorization pipeline. No key means the run does
+ * everything except step 5 of the cascade rather than failing —
+ * categorization never blocks an import.
+ */
+function buildLlm(env: Env): RunSyncDeps['llm'] {
+  const config = loadConfig(env);
+  return env.ANTHROPIC_API_KEY
+    ? { apiKey: env.ANTHROPIC_API_KEY, batchSize: config.llmBatchSize, model: CLASSIFIER_MODEL }
+    : null;
+}
+
 function buildSyncDeps(env: Env): RunSyncDeps {
   const config = loadConfig(env);
   return {
@@ -210,15 +240,7 @@ function buildSyncDeps(env: Env): RunSyncDeps {
     db: env.DB,
     kv: env.CACHE,
     now: () => Math.floor(Date.now() / 1000),
-    // No key means the run does everything except step 5 of the cascade,
-    // rather than failing. Categorization never blocks the sync.
-    llm: env.ANTHROPIC_API_KEY
-      ? {
-          apiKey: env.ANTHROPIC_API_KEY,
-          batchSize: config.llmBatchSize,
-          model: CLASSIFIER_MODEL,
-        }
-      : null,
+    llm: buildLlm(env),
   };
 }
 
