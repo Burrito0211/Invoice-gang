@@ -34,6 +34,12 @@ import {
 } from './api/auth.js';
 import { handleImport, handleImportPreview, hasImportToken } from './api/import.js';
 import {
+  handleCreateIncome,
+  handleDeleteIncome,
+  handleItemExclude,
+  handleListIncome,
+} from './api/income.js';
+import {
   handleCreateOverride,
   handleDeleteOverride,
   handleListCategories,
@@ -138,6 +144,17 @@ async function route(
   if (path === '/api/categories') return handleListCategories(env.DB);
   if (path === '/api/overrides') return handleListOverrides(env.DB);
   if (path === '/api/prizes') return handlePrizes(env.DB, url, today);
+
+  if (path === '/api/income') {
+    if (request.method === 'GET') return handleListIncome(env.DB, url, today);
+    if (request.method === 'POST') return handleCreateIncome(env.DB, request, now);
+  }
+  if (path.startsWith('/api/income/') && request.method === 'DELETE') {
+    return handleDeleteIncome(env.DB, path.slice('/api/income/'.length));
+  }
+  if (path === '/api/items/exclude' && request.method === 'POST') {
+    return handleItemExclude(env.DB, request);
+  }
 
   if (path === '/api/stats' || path === '/api/import/status') {
     const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));

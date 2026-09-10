@@ -436,3 +436,35 @@ td.num {
   gap: 0.6rem;
   margin-top: 1rem;
 }
+
+/* -------------------------------------------------------------- income + mine */
+
+.income-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.income-form input[type='text'],
+.income-form input[type='number'] {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.del-income {
+  padding: 0.1rem 0.5rem;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.del-income:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* An item marked not-mine: struck through and dimmed, but still listed. */
+tr.excluded td:not(:first-child) {
+  opacity: 0.4;
+  text-decoration: line-through;
+}

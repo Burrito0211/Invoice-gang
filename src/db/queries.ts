@@ -298,6 +298,77 @@ export async function getItemsForInvoice(
   return results ?? [];
 }
 
+/**
+ * Mark one line item as the owner's spending or not. An excluded item stays on
+ * its invoice — the paper total must still reconcile — but drops out of every
+ * spend aggregation. Returns whether a row was actually changed.
+ */
+export async function setItemExcluded(
+  db: D1Database,
+  itemId: number,
+  excluded: boolean,
+): Promise<boolean> {
+  const result = await db
+    .prepare(`UPDATE invoice_item SET excluded = ? WHERE id = ?`)
+    .bind(excluded ? 1 : 0, itemId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+// ------------------------------------------------------------------- income
+
+export interface IncomeRow {
+  id: number;
+  date: IsoDate;
+  amount: number;
+  source: string;
+  note: string | null;
+  created_at: Unix;
+}
+
+export async function insertIncome(
+  db: D1Database,
+  entry: { date: IsoDate; amount: number; source: string; note: string | null; now: Unix },
+): Promise<number> {
+  const row = await db
+    .prepare(
+      `INSERT INTO income (date, amount, source, note, created_at)
+       VALUES (?, ?, ?, ?, ?) RETURNING id`,
+    )
+    .bind(entry.date, entry.amount, entry.source, entry.note, entry.now)
+    .first<{ id: number }>();
+  if (!row) throw new Error('income insert returned no row');
+  return row.id;
+}
+
+export async function listIncome(db: D1Database, from: IsoDate, to: IsoDate): Promise<IncomeRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, date, amount, source, note, created_at
+       FROM income WHERE date BETWEEN ? AND ? ORDER BY date DESC, id DESC`,
+    )
+    .bind(from, to)
+    .all<IncomeRow>();
+  return results ?? [];
+}
+
+export async function deleteIncome(db: D1Database, id: number): Promise<boolean> {
+  const result = await db.prepare(`DELETE FROM income WHERE id = ?`).bind(id).run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function incomeTotalForRange(
+  db: D1Database,
+  from: IsoDate,
+  to: IsoDate,
+): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM income WHERE date BETWEEN ? AND ?`)
+    .bind(from, to)
+    .first<{ total: number }>();
+  return row?.total ?? 0;
+}
+
 /** An item plus the merchant context the cascade needs to classify it. */
 export interface CategorizableRow {
   id: number;
@@ -462,8 +533,9 @@ export async function listReviewItems(
   // to all of them — and AND binds tighter than OR, so without the brackets
   // `A OR B AND excluded` reads as `A OR (B AND excluded)` and discount rows
   // come back through the first branch.
+  // An excluded item is not the owner's spending, so it never needs review.
   const reasons = conditions.length > 0 ? `(${conditions.join(' OR ')}) AND ` : '';
-  const clause = `WHERE ${reasons}it.amount >= 0`;
+  const clause = `WHERE ${reasons}it.amount >= 0 AND it.excluded = 0`;
 
   const { results } = await db
     .prepare(
@@ -1011,6 +1083,7 @@ export async function summaryByCategory(db: D1Database, from: IsoDate, to: IsoDa
        WHERE i.inv_date BETWEEN ? AND ?
          AND (i.inv_status IS NULL OR i.inv_status <> '作廢')
          AND it.amount >= 0
+         AND it.excluded = 0
        GROUP BY key
        ORDER BY total DESC`,
     )
@@ -1028,7 +1101,7 @@ export async function summaryByMerchant(db: D1Database, from: IsoDate, to: IsoDa
               COUNT(it.id)                     AS item_count,
               SUM(COALESCE(it.net_amount, it.amount, 0))      AS total
        FROM invoice i
-       LEFT JOIN invoice_item it ON it.inv_num = i.inv_num
+       LEFT JOIN invoice_item it ON it.inv_num = i.inv_num AND it.excluded = 0
        WHERE i.inv_date BETWEEN ? AND ?
          AND (i.inv_status IS NULL OR i.inv_status <> '作廢')
        GROUP BY key
@@ -1048,7 +1121,7 @@ export async function summaryByMonth(db: D1Database, from: IsoDate, to: IsoDate)
               COUNT(it.id)              AS item_count,
               SUM(COALESCE(it.net_amount, it.amount, 0)) AS total
        FROM invoice i
-       LEFT JOIN invoice_item it ON it.inv_num = i.inv_num
+       LEFT JOIN invoice_item it ON it.inv_num = i.inv_num AND it.excluded = 0
        WHERE i.inv_date BETWEEN ? AND ?
          AND (i.inv_status IS NULL OR i.inv_status <> '作廢')
        GROUP BY key
@@ -1060,27 +1133,31 @@ export async function summaryByMonth(db: D1Database, from: IsoDate, to: IsoDate)
 }
 
 /**
- * Invoice-level totals for the range.
+ * Totals for the range, computed from items rather than invoice headers.
  *
- * `invoice_total` is what was actually spent — the invoice amount is the sum
- * of its lines, discounts included. `discount_total` is what those discounts
- * came to, reported separately so the dashboard can say what was saved rather
- * than leaving it silently absorbed into every line.
+ * `invoice_total` is what was actually spent: the sum of the included,
+ * positive, net line amounts — so a discount reduces it and an item marked
+ * "not mine" drops out of it, which the header amount could not express. In
+ * the file-import model every invoice always carries its items, so an
+ * item-based total is complete, and this is the number the category breakdown
+ * also sums to. `discount_total` is what discounts came to, reported
+ * separately so the dashboard can say what was saved.
  */
 export async function totalsForRange(db: D1Database, from: IsoDate, to: IsoDate) {
   return db
     .prepare(
-      // Plain positional binds, with the range supplied twice — D1 binds by
+      // Plain positional binds, the range supplied twice — D1 binds by
       // position and mixing `?` with `?1` in one statement is a trap.
-      `SELECT COUNT(*)                 AS invoice_count,
-              COALESCE(SUM(i.amount), 0) AS invoice_total,
-              COALESCE((SELECT -SUM(it.amount) FROM invoice_item it
-                        JOIN invoice j ON j.inv_num = it.inv_num
-                        WHERE it.amount < 0
-                          AND j.inv_date BETWEEN ? AND ?
-                          AND (j.inv_status IS NULL OR j.inv_status <> '作廢')), 0)
+      `SELECT (SELECT COUNT(*) FROM invoice i
+                WHERE i.inv_date BETWEEN ? AND ?
+                  AND (i.inv_status IS NULL OR i.inv_status <> '作廢')) AS invoice_count,
+              COALESCE(SUM(CASE WHEN it.amount >= 0 AND it.excluded = 0
+                                THEN COALESCE(it.net_amount, it.amount) ELSE 0 END), 0)
+                AS invoice_total,
+              COALESCE(-SUM(CASE WHEN it.amount < 0 THEN it.amount ELSE 0 END), 0)
                 AS discount_total
-       FROM invoice i
+       FROM invoice_item it
+       JOIN invoice i ON i.inv_num = it.inv_num
        WHERE i.inv_date BETWEEN ? AND ?
          AND (i.inv_status IS NULL OR i.inv_status <> '作廢')`,
     )
@@ -1113,7 +1190,7 @@ export async function classifierStats(db: D1Database) {
               COALESCE(SUM(CASE WHEN category_id IS NULL THEN 1 ELSE 0 END), 0)
                 AS uncategorized_count
        FROM invoice_item
-       WHERE amount >= 0`,
+       WHERE amount >= 0 AND excluded = 0`,
     )
     .first<{
       item_count: number;
@@ -1125,7 +1202,7 @@ export async function classifierStats(db: D1Database) {
   const bySource = await db
     .prepare(
       `SELECT COALESCE(category_source, 'none') AS source, COUNT(*) AS n
-       FROM invoice_item WHERE amount >= 0 GROUP BY source`,
+       FROM invoice_item WHERE amount >= 0 AND excluded = 0 GROUP BY source`,
     )
     .all<{ source: string; n: number }>();
 

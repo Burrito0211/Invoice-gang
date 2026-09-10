@@ -28,6 +28,7 @@
         <nav>
           <button data-view="dashboard" class="active">Spend</button>
           <button data-view="invoices">Invoices</button>
+          <button data-view="income">Income</button>
           <button data-view="review">Review</button>
           <button data-view="stats">Stats</button>
         </nav>
@@ -64,6 +65,21 @@
           <input id="search" type="search" placeholder="Search merchants and item descriptions…" />
           <div id="invoice-list"></div>
           <button id="load-more" hidden>Load more</button>
+        </section>
+
+        <section id="view-income" class="view" hidden>
+          <p class="hint">
+            The one place here you type a number by hand. Everything else is read
+            from your invoices; income has no invoice, so it is entered directly.
+          </p>
+          <form id="income-form" class="income-form">
+            <input id="income-date" type="date" required />
+            <input id="income-amount" type="number" min="1" step="1" placeholder="Amount NT$" required />
+            <input id="income-source" type="text" placeholder="Source, e.g. 薪資" required />
+            <input id="income-note" type="text" placeholder="Note (optional)" />
+            <button type="submit" class="upload">Add income</button>
+          </form>
+          <div id="income-list"></div>
         </section>
 
         <section id="view-review" class="view" hidden>

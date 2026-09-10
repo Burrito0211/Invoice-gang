@@ -67,6 +67,7 @@ async function showApp(): Promise<void> {
     });
   }
   $('csv').addEventListener('change', (event) => void handleUpload(event));
+  bindIncomeForm();
   $('search').addEventListener('input', debounce(() => void runSearch(), 250));
   $('load-more').addEventListener('click', () => void loadInvoices(false));
   $('detail-close').addEventListener('click', () => $<HTMLDialogElement>('detail').close());
@@ -83,8 +84,70 @@ function switchView(view: string): void {
     section.hidden = section.id !== `view-${view}`;
   }
   if (view === 'invoices' && state.invoices.length === 0) void loadInvoices(true);
+  if (view === 'income') void renderIncome();
   if (view === 'review') void renderReview();
   if (view === 'stats') void renderStats();
+}
+
+/**
+ * Manual income. This is the only screen that takes a typed figure — see the
+ * hint in the markup for why it is the exception rather than the rule.
+ */
+async function renderIncome(): Promise<void> {
+  const { income } = await api.income(state.from, state.to);
+  const total = income.reduce((sum, row) => sum + row.amount, 0);
+
+  $('income-list').innerHTML =
+    income.length === 0
+      ? '<p class="muted">No income recorded in this range.</p>'
+      : `<p class="muted">${money(total)} across ${income.length} entr${income.length === 1 ? 'y' : 'ies'}.</p>` +
+        income
+          .map(
+            (row) => `<div class="row">
+              <span class="muted">${escape(row.date)}</span>
+              <span class="grow">${escape(row.source)}${row.note ? ` · ${escape(row.note)}` : ''}</span>
+              <span class="amount">${escape(money(row.amount))}</span>
+              <button class="del-income" data-id="${row.id}" title="Delete">✕</button>
+            </div>`,
+          )
+          .join('');
+
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.del-income')) {
+    btn.addEventListener('click', async () => {
+      await api.deleteIncome(Number(btn.dataset.id));
+      await renderIncome();
+      await renderDashboard();
+    });
+  }
+}
+
+function bindIncomeForm(): void {
+  const form = $<HTMLFormElement>('income-form');
+  $<HTMLInputElement>('income-date').value = today();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const amount = Number($<HTMLInputElement>('income-amount').value);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      flash('Amount must be a whole number of NT$.');
+      return;
+    }
+    try {
+      await api.addIncome({
+        date: $<HTMLInputElement>('income-date').value,
+        amount,
+        source: $<HTMLInputElement>('income-source').value.trim(),
+        note: $<HTMLInputElement>('income-note').value.trim() || undefined,
+      });
+      $<HTMLInputElement>('income-amount').value = '';
+      $<HTMLInputElement>('income-source').value = '';
+      $<HTMLInputElement>('income-note').value = '';
+      flash('Income added.');
+      await renderIncome();
+      await renderDashboard();
+    } catch (err) {
+      flash(err instanceof ApiCallError ? err.message : 'could not add income');
+    }
+  });
 }
 
 // ---------------------------------------------------------------- dashboard
@@ -99,18 +162,21 @@ async function renderDashboard(): Promise<void> {
   const uncategorized = byCategory.breakdown.find((r) => r.key === 'uncategorized');
   const itemTotal = byCategory.totals.item_total;
 
-  const discount = byCategory.totals.discount_total;
+  const t = byCategory.totals;
 
   $('totals').innerHTML = [
-    // Already net of discounts — an invoice amount is the sum of its lines.
-    tile('Spent', money(byCategory.totals.invoice_total)),
-    tile('Invoices', String(byCategory.totals.invoice_count)),
-    tile('Discounts', discount === 0 ? '—' : `-${money(discount)}`),
-    tile(
-      'Uncategorized',
-      itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal),
-    ),
-  ].join('');
+    // Already net of discounts and of items marked not-mine.
+    tile('Spent', money(t.invoice_total)),
+    t.income_total > 0 ? tile('Income', money(t.income_total)) : '',
+    // Net only means something once there is income to net against.
+    t.income_total > 0
+      ? tile('Net', `${t.net_total < 0 ? '-' : ''}${money(Math.abs(t.net_total))}`)
+      : tile('Invoices', String(t.invoice_count)),
+    t.discount_total > 0 ? tile('Discounts', `-${money(t.discount_total)}`) : '',
+    tile('Uncategorized', itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal)),
+  ]
+    .filter((x) => x !== '')
+    .join('');
 
   $('chart-category').innerHTML = bars(byCategory.breakdown, { color: (row) => categoryColor(row.key) });
   $('chart-month').innerHTML = bars(byMonth.breakdown);
@@ -240,12 +306,14 @@ async function openInvoice(invNum: string): Promise<void> {
   $('detail-body').innerHTML = `
     <h2>${escape(detail.invoice.seller_name ?? invNum)}</h2>
     <p class="muted">${escape(detail.invoice.inv_date)} · ${escape(invNum)} · ${escape(money(detail.invoice.amount))}</p>
+    <p class="hint">Untick an item that is not yours — bought for someone else on a shared receipt. It stays on the invoice but drops out of your totals.</p>
     <table>
-      <thead><tr><th>Item</th><th>Category</th><th class="num">Amount</th></tr></thead>
+      <thead><tr><th>Mine</th><th>Item</th><th>Category</th><th class="num">Amount</th></tr></thead>
       <tbody>
         ${purchases
           .map(
-            (item) => `<tr>
+            (item) => `<tr class="${item.mine ? '' : 'excluded'}" data-item="${item.id}">
+              <td><input type="checkbox" class="mine" data-item="${item.id}" ${item.mine ? 'checked' : ''} /></td>
               <td>${escape(item.description)}</td>
               <td>${categorySelect(item.item_key, item.category)}
                   <span class="tag">${escape(item.category_source ?? 'none')}</span></td>
@@ -266,6 +334,24 @@ async function openInvoice(invNum: string): Promise<void> {
     }`;
 
   bindCategorySelects();
+
+  // Ticking "Mine" on or off marks the item excluded and refreshes the chart,
+  // so the effect on the totals is visible immediately.
+  for (const box of document.querySelectorAll<HTMLInputElement>('#detail-body input.mine')) {
+    box.addEventListener('change', async () => {
+      const id = Number(box.dataset.item);
+      box.closest('tr')?.classList.toggle('excluded', !box.checked);
+      try {
+        await api.setItemMine(id, box.checked);
+        await renderDashboard();
+      } catch (err) {
+        box.checked = !box.checked; // roll the UI back if the write failed
+        box.closest('tr')?.classList.toggle('excluded', !box.checked);
+        flash(err instanceof ApiCallError ? err.message : 'could not update the item');
+      }
+    });
+  }
+
   $<HTMLDialogElement>('detail').showModal();
 }
 

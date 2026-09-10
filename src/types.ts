@@ -112,6 +112,8 @@ export interface ItemRow {
   amount: number;
   /** Derived: amount after invoice-level discounts are allocated across lines. */
   net_amount: number | null;
+  /** 1 when this item is not the owner's spending; left out of every total. */
+  excluded: number;
   category_id: number | null;
   category_source: CategorySource | null;
   categorized_at: Unix | null;

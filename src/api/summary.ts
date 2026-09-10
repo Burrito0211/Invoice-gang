@@ -8,6 +8,7 @@
  * runs instead.
  */
 import {
+  incomeTotalForRange,
   monthlyByCategory,
   summaryByCategory,
   summaryByMerchant,
@@ -28,8 +29,13 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
     throw badRequest('group must be category, merchant or month');
   }
 
-  const totals = await totalsForRange(db, from, to);
-  const breakdown = await buildBreakdown(db, group, from, to);
+  const [totals, breakdown, income] = await Promise.all([
+    totalsForRange(db, from, to),
+    buildBreakdown(db, group, from, to),
+    incomeTotalForRange(db, from, to),
+  ]);
+
+  const spent = totals?.invoice_total ?? 0;
 
   return json({
     from,
@@ -37,10 +43,13 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
     group,
     totals: {
       invoice_count: totals?.invoice_count ?? 0,
-      // Already net of discounts: an invoice amount is the sum of its lines.
-      invoice_total: totals?.invoice_total ?? 0,
+      // Already net of discounts, and of items marked not-mine.
+      invoice_total: spent,
       discount_total: totals?.discount_total ?? 0,
       item_total: breakdown.reduce((sum, row) => sum + Number(row.total ?? 0), 0),
+      income_total: income,
+      // Positive means you took in more than you spent over the range.
+      net_total: income - spent,
     },
     breakdown,
   });

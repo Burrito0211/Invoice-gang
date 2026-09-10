@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS invoice_item (
     -- amount after invoice-level discounts are spread across the positive
     -- lines; see src/import/allocate.ts. Derived, recomputed on re-import.
     net_amount      INTEGER,
+    -- an item on the carrier that is not your spending (bought for someone
+    -- else on a shared receipt); kept for reconciliation, left out of totals
+    excluded        INTEGER NOT NULL DEFAULT 0,
 
     category_id     INTEGER REFERENCES category(id),
     category_source TEXT,                 -- override|merchant|cache|llm|none
@@ -207,6 +210,21 @@ CREATE TABLE IF NOT EXISTS prize_hit (
     notified_at  INTEGER
 );
 
+-- ----------------------------------------------------------------- income --
+-- Manually entered — the one number in this system typed rather than derived
+-- from an invoice. Its own table, never mixed into invoice_item, so the
+-- invoice pipeline is untouched.
+CREATE TABLE IF NOT EXISTS income (
+    id          INTEGER PRIMARY KEY,
+    date        TEXT NOT NULL,        -- YYYY-MM-DD
+    amount      INTEGER NOT NULL,     -- NT$, positive
+    source      TEXT NOT NULL,
+    note        TEXT,
+    created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_income_date ON income(date DESC);
+
 -- -------------------------------------------------------------- dashboard --
 -- Monthly spend by category. Defined here so the API layer has no aggregation
 -- SQL of its own to drift out of sync.
@@ -223,4 +241,5 @@ JOIN invoice i ON i.inv_num = it.inv_num
 LEFT JOIN category c ON c.id = it.category_id
 WHERE (i.inv_status IS NULL OR i.inv_status <> '作廢')
   AND it.amount >= 0
+  AND it.excluded = 0
 GROUP BY month, c.key;

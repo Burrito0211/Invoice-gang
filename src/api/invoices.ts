@@ -51,6 +51,9 @@ export async function handleInvoiceDetail(db: D1Database, invNum: string): Promi
       // What was actually spent on this line once invoice-level discounts are
       // spread across it. `amount` stays the export's raw figure.
       net_amount: item.net_amount ?? item.amount,
+      // False when the owner has marked this line as not theirs; the UI shows
+      // it struck through and drops it from the totals.
+      mine: item.excluded === 0,
       category: item.category_key,
       // The UI shows *why* an item was classified the way it was — the
       // difference between a rule and a guess is the whole trust story.

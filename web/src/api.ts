@@ -84,6 +84,20 @@ export const api = {
     }),
 
   importStatus: () => request<ImportStatus>('/api/import/status'),
+
+  setItemMine: (id: number, mine: boolean) =>
+    request<{ id: number; mine: boolean }>('/api/items/exclude', {
+      method: 'POST',
+      body: JSON.stringify({ id, mine }),
+    }),
+
+  income: (from: string, to: string) =>
+    request<{ income: IncomeRow[] }>(`/api/income?from=${from}&to=${to}`),
+
+  addIncome: (entry: { date: string; amount: number; source: string; note?: string }) =>
+    request<IncomeRow>('/api/income', { method: 'POST', body: JSON.stringify(entry) }),
+
+  deleteIncome: (id: number) => request<{ ok: true }>(`/api/income/${id}`, { method: 'DELETE' }),
 };
 
 // ------------------------------------------------------------------- shapes
@@ -114,6 +128,8 @@ export interface SummaryResponse {
     invoice_total: number;
     discount_total: number;
     item_total: number;
+    income_total: number;
+    net_total: number;
   };
   breakdown: SummaryRow[];
 }
@@ -143,8 +159,18 @@ export interface InvoiceItem {
   unit_price: number | null;
   amount: number;
   net_amount: number;
+  mine: boolean;
   category: string | null;
   category_source: string | null;
+}
+
+export interface IncomeRow {
+  id: number;
+  date: string;
+  amount: number;
+  source: string;
+  note: string | null;
+  created_at?: number;
 }
 
 export interface InvoiceDetailResponse {
