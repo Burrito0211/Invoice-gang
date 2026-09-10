@@ -15,6 +15,7 @@
  */
 import { findRunningSyncRun, getCarrierByCardNo } from '../db/queries.js';
 import { importCarrierCsv, type ImportDeps } from '../import/run.js';
+import { carrierKey } from '../lib/config.js';
 import { ApiError, json } from './respond.js';
 import type { Env, SyncTrigger, Unix } from '../types.js';
 
@@ -46,12 +47,12 @@ export async function handleImport(
   deps: Omit<ImportDeps, 'db' | 'kv'>,
   now: Unix,
 ): Promise<Response> {
-  const carrier = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO ?? '');
+  const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));
   if (!carrier) {
     throw new ApiError(
       409,
       'no_carrier',
-      'no carrier row — set EINVOICE_CARD_NO and import once to create it',
+      'no carrier row — the first import creates it; this should not happen',
     );
   }
 

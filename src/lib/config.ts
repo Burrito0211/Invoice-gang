@@ -21,6 +21,16 @@ export class ConfigError extends Error {
 /** Per-call batch size. Bigger is cheaper per item; 50 is the verified default. */
 const DEFAULT_LLM_BATCH_SIZE = 50;
 
+/**
+ * The carrier row's key. One helper because a mismatch here is invisible:
+ * `ensureCarrier` would create a row under one name while every lookup asked
+ * for another, and imports would fail with "no carrier row" forever.
+ */
+export function carrierKey(env: Env): string {
+  const configured = env.EINVOICE_CARD_NO?.trim();
+  return configured && configured !== '' ? configured : 'default';
+}
+
 export function loadConfig(env: Env): Config {
   return {
     llmBatchSize: int(env.LLM_BATCH_SIZE, DEFAULT_LLM_BATCH_SIZE, 'LLM_BATCH_SIZE'),

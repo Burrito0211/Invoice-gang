@@ -18,8 +18,12 @@ export interface Env {
   ASSETS?: Fetcher;
 
   // Secrets — `wrangler secret put`, never wrangler.jsonc, never the bundle.
-  /** Identifies the carrier row. Not a credential any more — nothing logs in. */
-  EINVOICE_CARD_NO: string;
+  /**
+   * Labels the carrier row. Not a credential any more — nothing logs in — and
+   * optional: unset just means the row is named `default`. Resolve it through
+   * `carrierKey()` so every lookup agrees with what `ensureCarrier` created.
+   */
+  EINVOICE_CARD_NO?: string;
   ANTHROPIC_API_KEY: string;
   SESSION_SECRET: string;
   OWNER_PASSWORD_HASH: string;

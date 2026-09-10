@@ -20,7 +20,7 @@ import {
   listSyncRuns,
 } from './db/queries.js';
 import { CLASSIFIER_MODEL } from './categorize/llm.js';
-import { loadConfig, requireAuthSecrets } from './lib/config.js';
+import { carrierKey, loadConfig, requireAuthSecrets } from './lib/config.js';
 import { isIsoDate, isoToUnix, toIsoDate } from './lib/dates.js';
 import type { ClassifyOptions } from './categorize/llm.js';
 import {
@@ -132,7 +132,7 @@ async function route(
   if (path === '/api/prizes') return handlePrizes(env.DB, url, today);
 
   if (path === '/api/stats' || path === '/api/import/status') {
-    const carrier = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO ?? '');
+    const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));
     const carrierId = carrier?.id ?? 0;
     return path === '/api/stats'
       ? handleStats(env.DB, carrierId)
@@ -160,7 +160,7 @@ async function route(
  */
 async function cronRun(env: Env): Promise<void> {
   const now = unixNow();
-  const carrier = await getCarrierByCardNo(env.DB, env.EINVOICE_CARD_NO ?? '');
+  const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));
   if (!carrier) {
     console.warn('no carrier row yet — import once to create it');
     return;
@@ -244,7 +244,7 @@ function buildLlm(env: Env): ClassifyOptions | null {
  * of when the carrier was first seen.
  */
 async function ensureCarrier(env: Env, now: number): Promise<void> {
-  const cardNo = env.EINVOICE_CARD_NO ?? 'default';
+  const cardNo = carrierKey(env);
   const existing = await getCarrierByCardNo(env.DB, cardNo);
   if (existing) return;
 
