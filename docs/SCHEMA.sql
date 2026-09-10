@@ -59,7 +59,10 @@ CREATE TABLE invoice_item (
     item_key        TEXT NOT NULL,        -- normalized; see CATEGORIZATION.md
     quantity        REAL,
     unit_price      INTEGER,
-    amount          INTEGER NOT NULL,
+    amount          INTEGER NOT NULL,   -- raw line amount from the export
+    -- amount after invoice-level discounts are spread across the positive
+    -- lines; see src/import/allocate.ts. Derived, recomputed on re-import.
+    net_amount      INTEGER,
 
     category_id     INTEGER REFERENCES category(id),
     category_source TEXT,                 -- override|merchant|cache|llm|none
@@ -196,9 +199,11 @@ SELECT substr(i.inv_date, 1, 7) AS month,
        c.label_en               AS category_en,
        c.label_zh               AS category_zh,
        COUNT(*)                 AS item_count,
-       SUM(it.amount)           AS total
+       -- net of invoice-level discounts; see src/import/allocate.ts
+       SUM(COALESCE(it.net_amount, it.amount)) AS total
 FROM invoice_item it
 JOIN invoice i ON i.inv_num = it.inv_num
 LEFT JOIN category c ON c.id = it.category_id
-WHERE i.inv_status IS NULL OR i.inv_status <> '作廢'
+WHERE (i.inv_status IS NULL OR i.inv_status <> '作廢')
+  AND it.amount >= 0
 GROUP BY month, c.key;

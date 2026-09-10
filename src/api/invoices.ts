@@ -48,6 +48,9 @@ export async function handleInvoiceDetail(db: D1Database, invNum: string): Promi
       quantity: item.quantity,
       unit_price: item.unit_price,
       amount: item.amount,
+      // What was actually spent on this line once invoice-level discounts are
+      // spread across it. `amount` stays the export's raw figure.
+      net_amount: item.net_amount ?? item.amount,
       category: item.category_key,
       // The UI shows *why* an item was classified the way it was — the
       // difference between a rule and a guess is the whole trust story.

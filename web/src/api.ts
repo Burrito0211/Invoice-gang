@@ -130,6 +130,7 @@ export interface InvoiceItem {
   quantity: number | null;
   unit_price: number | null;
   amount: number;
+  net_amount: number;
   category: string | null;
   category_source: string | null;
 }

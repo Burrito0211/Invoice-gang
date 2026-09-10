@@ -110,6 +110,8 @@ export interface ItemRow {
   quantity: number | null;
   unit_price: number | null;
   amount: number;
+  /** Derived: amount after invoice-level discounts are allocated across lines. */
+  net_amount: number | null;
   category_id: number | null;
   category_source: CategorySource | null;
   categorized_at: Unix | null;

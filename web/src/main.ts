@@ -182,24 +182,42 @@ async function loadInvoices(reset: boolean): Promise<void> {
 
 async function openInvoice(invNum: string): Promise<void> {
   const detail = await api.invoice(invNum);
+
+  // Discount rows are folded into the lines they discount rather than listed
+  // separately: the export files them as their own negative rows, but they
+  // apply to the whole invoice, so showing one row per product at its real
+  // price is what actually answers "what did this cost me".
+  const purchases = detail.items.filter((item) => item.amount >= 0);
+  const discount = detail.items
+    .filter((item) => item.amount < 0)
+    .reduce((sum, item) => sum + item.amount, 0);
   $('detail-body').innerHTML = `
     <h2>${escape(detail.invoice.seller_name ?? invNum)}</h2>
     <p class="muted">${escape(detail.invoice.inv_date)} · ${escape(invNum)} · ${escape(money(detail.invoice.amount))}</p>
     <table>
       <thead><tr><th>Item</th><th>Category</th><th class="num">Amount</th></tr></thead>
       <tbody>
-        ${detail.items
+        ${purchases
           .map(
             (item) => `<tr>
               <td>${escape(item.description)}</td>
               <td>${categorySelect(item.item_key, item.category)}
                   <span class="tag">${escape(item.category_source ?? 'none')}</span></td>
-              <td class="num">${escape(money(item.amount))}</td>
+              <td class="num">${escape(money(item.net_amount))}${
+                item.net_amount !== item.amount
+                  ? `<span class="muted"> was ${escape(money(item.amount))}</span>`
+                  : ''
+              }</td>
             </tr>`,
           )
           .join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${
+      discount === 0
+        ? ''
+        : `<p class="muted">Includes ${escape(money(discount))} of invoice discounts, spread across the lines above.</p>`
+    }`;
 
   bindCategorySelects();
   $<HTMLDialogElement>('detail').showModal();

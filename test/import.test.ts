@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { CsvFormatError, parseCarrierCsv, parseCsvLine } from '../src/import/csv.js';
 import { importCarrierCsv } from '../src/import/run.js';
 import { handleImportStatus } from '../src/api/status.js';
+import { selectUncategorizedItems } from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
 import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
 
@@ -234,5 +235,62 @@ describe('import status', () => {
 
     expect(body.age_days).toBeNull();
     expect(body.stale).toBe(true);
+  });
+});
+
+describe('discount allocation through an import', () => {
+  const netOf = async (invNum: string) => {
+    const { results } = await db
+      .prepare(
+        `SELECT row_num, description, amount, net_amount FROM invoice_item
+         WHERE inv_num = ? ORDER BY row_num`,
+      )
+      .bind(invNum)
+      .all<{ row_num: number; description: string; amount: number; net_amount: number }>();
+    return results;
+  };
+
+  it('spreads an invoice discount across its positive lines', async () => {
+    await importCarrierCsv(CSV, deps(), options);
+
+    // EY44910873: 59 + a -10 discount.
+    const rows = await netOf('EY44910873');
+    expect(rows.map((r) => r.net_amount)).toEqual([49, 0]);
+    expect(rows.reduce((s, r) => s + r.net_amount, 0)).toBe(49);
+  });
+
+  it('nets to the invoice total, matching the stored header amount', async () => {
+    await importCarrierCsv(CSV, deps(), options);
+
+    for (const invNum of ['EX31020263', 'EY44910873', 'ES35915268', 'EZ1234**']) {
+      const rows = await netOf(invNum);
+      const header = await db
+        .prepare(`SELECT amount FROM invoice WHERE inv_num = ?`)
+        .bind(invNum)
+        .first<{ amount: number }>();
+      expect(rows.reduce((s, r) => s + r.net_amount, 0)).toBe(header?.amount);
+    }
+  });
+
+  it('recomputes the allocation on re-import instead of leaving it stale', async () => {
+    // INSERT OR IGNORE does not update, so without an explicit refresh a
+    // re-import would keep whatever the first one wrote.
+    await importCarrierCsv(CSV, deps(), options);
+    await db.prepare(`UPDATE invoice_item SET net_amount = 999`).run();
+
+    await importCarrierCsv(CSV, deps(), options);
+
+    const rows = await netOf('EY44910873');
+    expect(rows.map((r) => r.net_amount)).toEqual([49, 0]);
+  });
+
+  it('keeps discount rows out of the classifier queue', async () => {
+    // Classifying "折扣（10％）" would spend a model call on an accounting
+    // adjustment and file it under some spending category.
+    await importCarrierCsv(CSV, deps(), options);
+
+    const queued = await selectUncategorizedItems(db, 100);
+    expect(queued.some((r) => r.description.includes('折扣'))).toBe(false);
+    expect(queued.length).toBeGreaterThan(0);
   });
 });

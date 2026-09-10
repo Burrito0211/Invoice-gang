@@ -213,12 +213,13 @@ export function insertItemStatement(
   invNum: string,
   detail: InvoiceDetailRow,
   itemKey: string,
+  netAmount: number,
 ): D1PreparedStatement {
   return db
     .prepare(
       `INSERT OR IGNORE INTO invoice_item
-         (inv_num, row_num, description, item_key, quantity, unit_price, amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+         (inv_num, row_num, description, item_key, quantity, unit_price, amount, net_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id`,
     )
     .bind(
@@ -229,7 +230,24 @@ export function insertItemStatement(
       detail.quantity,
       detail.unitPrice,
       detail.amount,
+      netAmount,
     );
+}
+
+/**
+ * Refresh the derived net amount on a row that already exists. Re-importing
+ * an overlapping export must not leave an old allocation in place, and
+ * `INSERT OR IGNORE` by design does not update.
+ */
+export function updateNetAmountStatement(
+  db: D1Database,
+  invNum: string,
+  rowNum: number,
+  netAmount: number,
+): D1PreparedStatement {
+  return db
+    .prepare(`UPDATE invoice_item SET net_amount = ? WHERE inv_num = ? AND row_num = ?`)
+    .bind(netAmount, invNum, rowNum);
 }
 
 /** The ids a batched item insert actually created; ignored rows return none. */
@@ -276,6 +294,11 @@ export interface CategorizableRow {
   seller_name: string | null;
 }
 
+/**
+ * Discount rows are excluded everywhere this feeds: they are not purchases,
+ * and classifying "折扣（10％）" would spend a model call to file an
+ * accounting adjustment under a spending category.
+ */
 const CATEGORIZABLE_SELECT = `SELECT it.id, it.item_key, it.description, i.seller_ban, i.seller_name
    FROM invoice_item it
    JOIN invoice i ON i.inv_num = it.inv_num`;
@@ -286,7 +309,7 @@ export async function getCategorizableItems(
 ): Promise<CategorizableRow[]> {
   if (ids.length === 0) return [];
   const { results } = await db
-    .prepare(`${CATEGORIZABLE_SELECT} WHERE it.id IN (${placeholders(ids.length)})`)
+    .prepare(`${CATEGORIZABLE_SELECT} WHERE it.id IN (${placeholders(ids.length)}) AND it.amount >= 0`)
     .bind(...ids)
     .all<CategorizableRow>();
   return results ?? [];
@@ -302,7 +325,7 @@ export async function selectUncategorizedItems(
   limit: number,
 ): Promise<CategorizableRow[]> {
   const { results } = await db
-    .prepare(`${CATEGORIZABLE_SELECT} WHERE it.category_id IS NULL ORDER BY it.id LIMIT ?`)
+    .prepare(`${CATEGORIZABLE_SELECT} WHERE it.category_id IS NULL AND it.amount >= 0 ORDER BY it.id LIMIT ?`)
     .bind(limit)
     .all<CategorizableRow>();
   return results ?? [];
@@ -433,7 +456,7 @@ export async function listReviewItems(
        JOIN invoice i ON i.inv_num = it.inv_num
        LEFT JOIN category c ON c.id = it.category_id
        LEFT JOIN item_category_cache cache ON cache.item_key = it.item_key
-       ${clause}
+       ${clause ? clause + ' AND it.amount >= 0' : 'WHERE it.amount >= 0'}
        ORDER BY it.amount DESC
        LIMIT ?`,
     )
@@ -505,7 +528,7 @@ export async function insertMerchantRule(
 export async function topUnruledMerchants(db: D1Database, limit: number) {
   const { results } = await db
     .prepare(
-      `SELECT i.seller_ban, i.seller_name, COUNT(*) AS n, SUM(it.amount) AS total
+      `SELECT i.seller_ban, i.seller_name, COUNT(*) AS n, SUM(COALESCE(it.net_amount, it.amount)) AS total
        FROM invoice_item it
        JOIN invoice i ON i.inv_num = it.inv_num
        WHERE it.category_source IN ('llm', 'none')
@@ -947,12 +970,13 @@ export async function summaryByCategory(db: D1Database, from: IsoDate, to: IsoDa
               COALESCE(c.label_zh, '未分類')        AS label_zh,
               c.color                               AS color,
               COUNT(*)                              AS item_count,
-              SUM(it.amount)                        AS total
+              SUM(COALESCE(it.net_amount, it.amount))                        AS total
        FROM invoice_item it
        JOIN invoice i ON i.inv_num = it.inv_num
        LEFT JOIN category c ON c.id = it.category_id
        WHERE i.inv_date BETWEEN ? AND ?
          AND (i.inv_status IS NULL OR i.inv_status <> '作廢')
+         AND it.amount >= 0
        GROUP BY key
        ORDER BY total DESC`,
     )
@@ -968,7 +992,7 @@ export async function summaryByMerchant(db: D1Database, from: IsoDate, to: IsoDa
               COALESCE(i.seller_name, '(unknown)') AS label_en,
               COUNT(DISTINCT i.inv_num)        AS invoice_count,
               COUNT(it.id)                     AS item_count,
-              SUM(COALESCE(it.amount, 0))      AS total
+              SUM(COALESCE(it.net_amount, it.amount, 0))      AS total
        FROM invoice i
        LEFT JOIN invoice_item it ON it.inv_num = i.inv_num
        WHERE i.inv_date BETWEEN ? AND ?
@@ -988,7 +1012,7 @@ export async function summaryByMonth(db: D1Database, from: IsoDate, to: IsoDate)
               substr(i.inv_date, 1, 7) AS label_en,
               COUNT(DISTINCT i.inv_num) AS invoice_count,
               COUNT(it.id)              AS item_count,
-              SUM(COALESCE(it.amount, 0)) AS total
+              SUM(COALESCE(it.net_amount, it.amount, 0)) AS total
        FROM invoice i
        LEFT JOIN invoice_item it ON it.inv_num = i.inv_num
        WHERE i.inv_date BETWEEN ? AND ?
@@ -1034,12 +1058,14 @@ export async function classifierStats(db: D1Database) {
   const items = await db
     .prepare(
       `SELECT COUNT(*) AS item_count,
-              COALESCE(SUM(amount), 0) AS item_total,
-              COALESCE(SUM(CASE WHEN category_id IS NULL THEN amount ELSE 0 END), 0)
+              COALESCE(SUM(COALESCE(net_amount, amount)), 0) AS item_total,
+              COALESCE(SUM(CASE WHEN category_id IS NULL
+                                THEN COALESCE(net_amount, amount) ELSE 0 END), 0)
                 AS uncategorized_total,
               COALESCE(SUM(CASE WHEN category_id IS NULL THEN 1 ELSE 0 END), 0)
                 AS uncategorized_count
-       FROM invoice_item`,
+       FROM invoice_item
+       WHERE amount >= 0`,
     )
     .first<{
       item_count: number;
@@ -1051,7 +1077,7 @@ export async function classifierStats(db: D1Database) {
   const bySource = await db
     .prepare(
       `SELECT COALESCE(category_source, 'none') AS source, COUNT(*) AS n
-       FROM invoice_item GROUP BY source`,
+       FROM invoice_item WHERE amount >= 0 GROUP BY source`,
     )
     .all<{ source: string; n: number }>();
 

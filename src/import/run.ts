@@ -25,6 +25,7 @@ import {
   getSyncRun,
   insertItemStatement,
   markDetailFetched,
+  updateNetAmountStatement,
   markSyncSuccess,
   selectUncategorizedItems,
   setWatermark,
@@ -33,6 +34,7 @@ import {
 } from '../db/queries.js';
 import { categorizeItems, type CategorizeTotals, type PipelineDeps } from '../categorize/pipeline.js';
 import { itemKey } from '../categorize/normalize.js';
+import { allocateDiscounts } from './allocate.js';
 import { parseCarrierCsv, type ParsedInvoice } from './csv.js';
 import { rocPeriodFor } from '../lib/dates.js';
 import type { SyncRunRow, SyncTrigger, Unix } from '../types.js';
@@ -170,12 +172,26 @@ async function persist(
     headersNew += countNewHeaders(headerResult, now);
 
     if (invoice.items.length > 0) {
+      // Invoice-level discounts are spread across the positive lines here,
+      // where the whole invoice is in hand. Storing the raw amount and the
+      // net side by side keeps the export's own numbers verifiable while the
+      // charts report what was actually spent.
+      const net = allocateDiscounts(invoice.items);
+
       const itemResult = await deps.db.batch<{ id: number }>(
-        invoice.items.map((item) =>
-          insertItemStatement(deps.db, header.invNum, item, itemKey(item.description)),
+        invoice.items.map((item, index) =>
+          insertItemStatement(deps.db, header.invNum, item, itemKey(item.description), net[index]!),
         ),
       );
       ids.push(...collectInsertedIds(itemResult));
+
+      // INSERT OR IGNORE leaves an existing row alone, so a re-import would
+      // otherwise keep a stale allocation. Refresh it explicitly.
+      await deps.db.batch(
+        invoice.items.map((item, index) =>
+          updateNetAmountStatement(deps.db, header.invNum, item.rowNum, net[index]!),
+        ),
+      );
     }
 
     // The items are present by definition here, so the invoice is never left
