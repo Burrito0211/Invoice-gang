@@ -101,6 +101,7 @@ export interface SummaryResponse {
   totals: {
     invoice_count: number;
     invoice_total: number;
+    discount_total: number;
     item_total: number;
   };
   breakdown: SummaryRow[];

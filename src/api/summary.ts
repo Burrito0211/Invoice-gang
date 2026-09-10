@@ -37,7 +37,9 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
     group,
     totals: {
       invoice_count: totals?.invoice_count ?? 0,
+      // Already net of discounts: an invoice amount is the sum of its lines.
       invoice_total: totals?.invoice_total ?? 0,
+      discount_total: totals?.discount_total ?? 0,
       item_total: breakdown.reduce((sum, row) => sum + Number(row.total ?? 0), 0),
     },
     breakdown,

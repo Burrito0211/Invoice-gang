@@ -99,9 +99,13 @@ async function renderDashboard(): Promise<void> {
   const uncategorized = byCategory.breakdown.find((r) => r.key === 'uncategorized');
   const itemTotal = byCategory.totals.item_total;
 
+  const discount = byCategory.totals.discount_total;
+
   $('totals').innerHTML = [
+    // Already net of discounts — an invoice amount is the sum of its lines.
     tile('Spent', money(byCategory.totals.invoice_total)),
     tile('Invoices', String(byCategory.totals.invoice_count)),
+    tile('Discounts', discount === 0 ? '—' : `-${money(discount)}`),
     tile(
       'Uncategorized',
       itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal),
@@ -117,20 +121,34 @@ function tile(label: string, value: string): string {
   return `<div class="tile"><div class="label">${escape(label)}</div><div class="value">${escape(value)}</div></div>`;
 }
 
-/** A bar chart is two divs and a percentage. This is the whole charting layer. */
+/**
+ * A bar chart is two divs and a percentage. This is the whole charting layer.
+ *
+ * Every row carries its share of the total alongside the amount, because
+ * "NT$1,913" only becomes an answer once you know it is 84% of the month.
+ * Bars are scaled against the largest row so the shape is readable; the
+ * percentage is against the total, which is the number that means something.
+ */
 function bars(rows: SummaryRow[], color?: (row: SummaryRow) => string): string {
   if (rows.length === 0) return '<p class="muted">Nothing in this range yet.</p>';
-  const max = Math.max(...rows.map((r) => Number(r.total) || 0), 1);
+
+  const values = rows.map((r) => Number(r.total) || 0);
+  const max = Math.max(...values, 1);
+  const total = values.reduce((sum, v) => sum + v, 0);
 
   return `<div class="bars">${rows
-    .map((row) => {
-      const total = Number(row.total) || 0;
-      const width = Math.max(1, Math.round((total / max) * 100));
+    .map((row, index) => {
+      const value = values[index] ?? 0;
+      const width = Math.max(1, Math.round((value / max) * 100));
+      const share = total === 0 ? 0 : value / total;
       const fill = color ? color(row) : 'var(--accent)';
       return `<div class="bar-row">
           <span class="bar-label" title="${escape(row.label_en)}">${escape(row.label_en)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${width}%;background:${escape(fill)}"></span></span>
-          <span class="bar-value">${escape(money(total))}</span>
+          <span class="bar-value">
+            <span class="bar-amount">${escape(money(value))}</span>
+            <span class="bar-share">${escape(percent(share))}</span>
+          </span>
         </div>`;
     })
     .join('')}</div>`;

@@ -190,7 +190,9 @@ main {
 
 .bar-row {
   display: grid;
-  grid-template-columns: minmax(90px, 30%) 1fr auto;
+  /* The label gets real room: "Uncategorized" truncating to "Uncategori…"
+     made the busiest category the least readable one. */
+  grid-template-columns: minmax(120px, 8rem) 1fr auto;
   gap: 0.6rem;
   align-items: center;
 }
@@ -200,6 +202,7 @@ main {
   border-radius: 999px;
   height: 12px;
   overflow: hidden;
+  min-width: 40px;
 }
 
 .bar-fill {
@@ -208,16 +211,37 @@ main {
   background: var(--accent);
 }
 
+/* Amount over share: the amount is the fact, the share is the context. */
 .bar-value {
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
   font-size: 0.85rem;
+  text-align: right;
+  min-width: 5.5rem;
+  display: grid;
+  line-height: 1.25;
+}
+
+.bar-amount {
+  color: var(--text);
+}
+
+.bar-share {
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 .bar-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 420px) {
+  .bar-row {
+    grid-template-columns: minmax(90px, 6.5rem) 1fr auto;
+    gap: 0.45rem;
+  }
 }
 
 /* ------------------------------------------------------------------ lists */

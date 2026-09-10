@@ -449,7 +449,8 @@ export async function listReviewItems(
 
   const { results } = await db
     .prepare(
-      `SELECT it.id, it.inv_num, it.description, it.item_key, it.amount,
+      `SELECT it.id, it.inv_num, it.description, it.item_key,
+              COALESCE(it.net_amount, it.amount) AS amount,
               it.category_source, c.key AS category_key,
               cache.confidence, i.inv_date, i.seller_name, i.seller_ban
        FROM invoice_item it
@@ -457,7 +458,7 @@ export async function listReviewItems(
        LEFT JOIN category c ON c.id = it.category_id
        LEFT JOIN item_category_cache cache ON cache.item_key = it.item_key
        ${clause ? clause + ' AND it.amount >= 0' : 'WHERE it.amount >= 0'}
-       ORDER BY it.amount DESC
+       ORDER BY COALESCE(it.net_amount, it.amount) DESC
        LIMIT ?`,
     )
     .bind(...binds, options.limit)
@@ -1025,19 +1026,33 @@ export async function summaryByMonth(db: D1Database, from: IsoDate, to: IsoDate)
   return results ?? [];
 }
 
-/** Invoice-level total for the range — items can lag their header. */
+/**
+ * Invoice-level totals for the range.
+ *
+ * `invoice_total` is what was actually spent — the invoice amount is the sum
+ * of its lines, discounts included. `discount_total` is what those discounts
+ * came to, reported separately so the dashboard can say what was saved rather
+ * than leaving it silently absorbed into every line.
+ */
 export async function totalsForRange(db: D1Database, from: IsoDate, to: IsoDate) {
   return db
     .prepare(
-      `SELECT COUNT(*)                     AS invoice_count,
-              COALESCE(SUM(amount), 0)     AS invoice_total,
-              SUM(CASE WHEN detail_fetched_at IS NULL THEN 1 ELSE 0 END) AS pending_details
-       FROM invoice
-       WHERE inv_date BETWEEN ? AND ?
-         AND (inv_status IS NULL OR inv_status <> '作廢')`,
+      // Plain positional binds, with the range supplied twice — D1 binds by
+      // position and mixing `?` with `?1` in one statement is a trap.
+      `SELECT COUNT(*)                 AS invoice_count,
+              COALESCE(SUM(i.amount), 0) AS invoice_total,
+              COALESCE((SELECT -SUM(it.amount) FROM invoice_item it
+                        JOIN invoice j ON j.inv_num = it.inv_num
+                        WHERE it.amount < 0
+                          AND j.inv_date BETWEEN ? AND ?
+                          AND (j.inv_status IS NULL OR j.inv_status <> '作廢')), 0)
+                AS discount_total
+       FROM invoice i
+       WHERE i.inv_date BETWEEN ? AND ?
+         AND (i.inv_status IS NULL OR i.inv_status <> '作廢')`,
     )
-    .bind(from, to)
-    .first<{ invoice_count: number; invoice_total: number; pending_details: number }>();
+    .bind(from, to, from, to)
+    .first<{ invoice_count: number; invoice_total: number; discount_total: number }>();
 }
 
 /**
