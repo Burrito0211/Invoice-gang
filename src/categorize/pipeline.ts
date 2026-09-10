@@ -141,6 +141,40 @@ export async function categorizeItems(
 }
 
 /**
+ * Resolve categories without writing anything — the dry run behind the import
+ * preview screen.
+ *
+ * Only the free steps of the cascade run (override → item rule → merchant rule
+ * → cache); the model is never called, because the point of a preview is to
+ * show what will happen instantly and reversibly, and a model call is neither.
+ * An item the rules cannot place comes back `null`, which the UI shows as
+ * "not yet classified" — the same state a real import would leave it in until
+ * corrected.
+ */
+export async function categorizePreview(
+  items: CategorizableItem[],
+  deps: Pick<PipelineDeps, 'db' | 'kv'>,
+): Promise<Map<number, { categoryKey: string; source: CategorySource }>> {
+  const out = new Map<number, { categoryKey: string; source: CategorySource }>();
+  if (items.length === 0) return out;
+
+  const categories = await listCategories(deps.db);
+  const keyById = new Map(categories.map((c) => [c.id, c.key]));
+  // loadRuleContext only reads, so a throwaway `now`/`llm` is harmless here.
+  const ctx = await loadRuleContext({ ...deps, now: () => 0, llm: null }, items, categories);
+
+  for (const item of items) {
+    const hit = resolve(
+      { itemKey: item.itemKey, sellerBan: item.sellerBan, sellerName: item.sellerName },
+      ctx,
+    );
+    const key = hit && keyById.get(hit.categoryId);
+    if (hit && key) out.set(item.id, { categoryKey: key, source: hit.source });
+  }
+  return out;
+}
+
+/**
  * The free context, loaded once per pass. Cache lookups go to KV first — it is
  * the hot read path — and fall back to the table, which is authoritative and
  * survives a KV namespace being recreated.

@@ -71,8 +71,18 @@ DELETE /api/categorize
 Removes an override and re-resolves the affected items back down the cascade.
 
 ```
-POST /api/import
+POST /api/import/preview
   body: the carrier CSV export, as text/csv
+```
+A dry run: parses and categorizes the file and writes nothing. Returns each
+invoice with its proposed category per item, which invoices are already
+imported, and any skipped rows — what the review screen renders. Owner session
+only; never accepts the bearer token, since a headless upload has no screen.
+
+```
+POST /api/import
+  body: the carrier CSV export, as text/csv       (imports the whole file)
+   or:  application/json { csv, include[], overrides[] }  (from the preview)
 ```
 Parses, stores and categorizes an export. Accepts the owner session cookie, or
 `Authorization: Bearer <IMPORT_TOKEN>` so the watch-folder script can upload

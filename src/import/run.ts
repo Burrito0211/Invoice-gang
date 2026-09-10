@@ -51,6 +51,13 @@ export interface ImportOptions {
   trigger: SyncTrigger;
   /** Items left uncategorized by a previous run, retried alongside the new ones. */
   retryLimit?: number;
+  /**
+   * When present, only these invoice numbers are imported. The preview screen
+   * sends the set the owner ticked; the watch-folder path omits it and takes
+   * the whole file. An empty set means "import nothing", which is distinct
+   * from omitting the field.
+   */
+  include?: Set<string>;
 }
 
 export interface ImportResult {
@@ -82,14 +89,22 @@ export async function importCarrierCsv(
   try {
     const parsed = parseCarrierCsv(csv);
     skipped = parsed.skipped;
-    headersSeen = parsed.invoices.length;
-    masked = parsed.invoices.filter((i) => i.masked).map((i) => i.header.invNum);
 
-    const dates = parsed.invoices.map((i) => i.header.invDate).sort();
+    // Honour the owner's selection from the preview screen. Filtering here,
+    // before anything is counted or persisted, keeps the whole run — the
+    // watermark included — about only the invoices that were actually chosen.
+    const chosen = options.include
+      ? parsed.invoices.filter((i) => options.include!.has(i.header.invNum))
+      : parsed.invoices;
+
+    headersSeen = chosen.length;
+    masked = chosen.filter((i) => i.masked).map((i) => i.header.invNum);
+
+    const dates = chosen.map((i) => i.header.invDate).sort();
     windowStart = dates[0] ?? null;
     windowEnd = dates[dates.length - 1] ?? null;
 
-    const newItemIds = await persist(parsed.invoices, deps, options.carrierId);
+    const newItemIds = await persist(chosen, deps, options.carrierId);
     headersNew = newItemIds.headersNew;
     itemsNew = newItemIds.ids.length;
 

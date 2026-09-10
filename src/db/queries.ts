@@ -127,6 +127,19 @@ export async function markDetailFetched(db: D1Database, invNum: string, now: Uni
     .run();
 }
 
+/** Which of these invoice numbers already exist — for the preview's "already imported" flag. */
+export async function existingInvoiceNumbers(
+  db: D1Database,
+  invNums: string[],
+): Promise<Set<string>> {
+  if (invNums.length === 0) return new Set();
+  const { results } = await db
+    .prepare(`SELECT inv_num FROM invoice WHERE inv_num IN (${placeholders(invNums.length)})`)
+    .bind(...invNums)
+    .all<{ inv_num: string }>();
+  return new Set((results ?? []).map((r) => r.inv_num));
+}
+
 export async function getInvoice(db: D1Database, invNum: string): Promise<InvoiceRow | null> {
   return db.prepare(`SELECT * FROM invoice WHERE inv_num = ?`).bind(invNum).first<InvoiceRow>();
 }

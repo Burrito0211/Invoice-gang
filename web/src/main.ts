@@ -383,9 +383,11 @@ async function renderStats(): Promise<void> {
 }
 
 /**
- * Import a carrier CSV export. The file is read in the browser and posted as
- * text — the same endpoint the watch-folder script uses, so there is one
- * import path and not two that drift apart.
+ * Import a carrier CSV export — but never straight in. The file is previewed
+ * first: parsed and categorized server-side without a single write, then shown
+ * for the owner to pick which invoices to keep and correct any category before
+ * anything is committed. The raw CSV is held in the browser between the two
+ * steps so the server stays the single parser.
  */
 async function handleUpload(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
@@ -394,26 +396,111 @@ async function handleUpload(event: Event): Promise<void> {
 
   const label = document.querySelector<HTMLLabelElement>('.upload');
   const original = label?.textContent ?? 'Import CSV';
-  if (label) label.textContent = 'Importing…';
+  if (label) label.textContent = 'Reading…';
 
   try {
-    const result = await api.importCsv(await file.text());
+    const csv = await file.text();
+    const preview = await api.importPreview(csv);
+    openPreview(csv, preview);
+  } catch (err) {
+    flash(err instanceof ApiCallError ? err.message : 'could not read the file');
+  } finally {
+    if (label) label.textContent = original;
+    input.value = ''; // reset so re-selecting the same file fires `change` again
+  }
+}
+
+/** Per-item category the owner has changed in the preview: item_key → category key. */
+const previewEdits = new Map<string, string>();
+
+/**
+ * The review screen. Each invoice is a checkbox; already-imported ones start
+ * unticked, because re-importing is harmless but rarely what was meant. Every
+ * item shows its proposed category in an editable dropdown — changing one
+ * queues an override that is written on commit.
+ */
+function openPreview(csv: string, preview: import('./api.js').ImportPreview): void {
+  previewEdits.clear();
+
+  const total = preview.invoices.length;
+  const fresh = preview.invoices.filter((i) => !i.already_imported).length;
+  $('preview-summary').textContent =
+    `${total} invoice${total === 1 ? '' : 's'} in the file — ${fresh} new, ` +
+    `${total - fresh} already imported.` +
+    (preview.skipped_rows.length > 0 ? ` ${preview.skipped_rows.length} row(s) skipped.` : '');
+
+  $('preview-body').innerHTML = preview.invoices
+    .map((inv) => {
+      const items = inv.items
+        .map(
+          (item) => `<tr>
+            <td>${escape(item.description)}</td>
+            <td>${categorySelect(item.item_key, item.category)}</td>
+            <td class="num">${escape(money(item.net_amount))}</td>
+          </tr>`,
+        )
+        .join('');
+      return `<section class="preview-invoice">
+          <label class="preview-invoice-head">
+            <input type="checkbox" class="pick" data-inv="${escape(inv.inv_num)}" ${inv.already_imported ? '' : 'checked'} />
+            <span class="grow">${escape(inv.seller_name ?? inv.inv_num)}</span>
+            <span class="muted">${escape(inv.inv_date)}</span>
+            <span class="amount">${escape(money(inv.amount))}</span>
+            ${inv.already_imported ? '<span class="tag">already imported</span>' : ''}
+            ${inv.masked ? '<span class="tag">masked number</span>' : ''}
+          </label>
+          <table><tbody>${items}</tbody></table>
+        </section>`;
+    })
+    .join('');
+
+  // A changed dropdown in the preview edits the pending import, not the
+  // database — nothing here writes until Import selected is pressed.
+  for (const select of document.querySelectorAll<HTMLSelectElement>('#preview-body select.cat')) {
+    select.addEventListener('change', () => {
+      const key = select.dataset.key ?? '';
+      if (key !== '' && select.value !== '') previewEdits.set(key, select.value);
+      else previewEdits.delete(key);
+    });
+  }
+
+  const confirm = $<HTMLButtonElement>('preview-confirm');
+  confirm.onclick = () => void commitPreview(csv);
+  $<HTMLButtonElement>('preview-cancel').onclick = () => $<HTMLDialogElement>('preview').close();
+  $<HTMLDialogElement>('preview').showModal();
+}
+
+async function commitPreview(csv: string): Promise<void> {
+  const include = [...document.querySelectorAll<HTMLInputElement>('#preview-body input.pick:checked')]
+    .map((box) => box.dataset.inv ?? '')
+    .filter((n) => n !== '');
+
+  if (include.length === 0) {
+    flash('Tick at least one invoice to import.');
+    return;
+  }
+
+  const overrides = [...previewEdits].map(([item_key, category]) => ({ item_key, category }));
+  const confirm = $<HTMLButtonElement>('preview-confirm');
+  confirm.disabled = true;
+  confirm.textContent = 'Importing…';
+
+  try {
+    const result = await api.importCommit({ csv, include, overrides });
     const run = result.run;
     flash(
-      `${result.invoices_seen} invoices read — ${run.headers_new} new, ` +
-        `${run.items_new} items, ${run.llm_calls} model call(s)`,
+      `Imported ${include.length} invoice${include.length === 1 ? '' : 's'} — ` +
+        `${run.headers_new} new, ${run.items_new} items` +
+        (result.items_corrected ? `, ${result.items_corrected} corrected` : ''),
     );
-    if (result.masked_invoice_numbers.length > 0) {
-      flash(`${result.masked_invoice_numbers.length} invoice number(s) were masked by the export`);
-    }
+    $<HTMLDialogElement>('preview').close();
     await renderDashboard();
     await renderStaleness();
   } catch (err) {
     flash(err instanceof ApiCallError ? err.message : 'import failed');
   } finally {
-    if (label) label.textContent = original;
-    // Reset so re-selecting the same file fires `change` again.
-    input.value = '';
+    confirm.disabled = false;
+    confirm.textContent = 'Import selected';
   }
 }
 

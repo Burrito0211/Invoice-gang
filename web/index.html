@@ -80,6 +80,18 @@
       </main>
 
       <dialog id="detail"><div id="detail-body"></div><button id="detail-close">Close</button></dialog>
+
+      <dialog id="preview">
+        <div class="preview-head">
+          <h2>Review before importing</h2>
+          <p id="preview-summary" class="muted"></p>
+        </div>
+        <div id="preview-body"></div>
+        <div class="preview-actions">
+          <button id="preview-cancel">Cancel</button>
+          <button id="preview-confirm" class="upload">Import selected</button>
+        </div>
+      </dialog>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

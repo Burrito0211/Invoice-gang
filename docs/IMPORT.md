@@ -136,6 +136,25 @@ idempotent — so the archive is tidiness, not safety.
 Without the watcher you can drag the CSV into the dashboard instead. Same
 endpoint, same code path.
 
+## Review before importing
+
+A file dragged into the dashboard is not committed straight away. It goes to
+`/api/import/preview` first — a dry run that parses and categorizes the whole
+file **without writing anything** — and the result is shown for review:
+
+- every invoice, with a checkbox; ones already imported start unticked, since
+  re-importing is harmless but rarely intended
+- every item's proposed category, in a dropdown that can be corrected on the
+  spot; a change becomes an item override on commit, outranking the rules
+- the net amount per line, discounts already allocated
+
+Only the ticked invoices are committed, and only when *Import selected* is
+pressed. The raw CSV is held in the browser between preview and commit, so the
+server stays the single parser — the client never re-serializes what it chose.
+
+The watch-folder path skips all of this: a headless upload has no screen to
+review onto, so it posts the raw CSV and imports the whole file as before.
+
 ## Staleness
 
 The cron trigger no longer fetches anything, because there is nothing to fetch.

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { CsvFormatError, parseCarrierCsv, parseCsvLine } from '../src/import/csv.js';
 import { importCarrierCsv } from '../src/import/run.js';
+import { categorizePreview } from '../src/categorize/pipeline.js';
 import { handleImportStatus } from '../src/api/status.js';
 import { listReviewItems, selectUncategorizedItems } from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
@@ -347,3 +348,50 @@ describe('the review queue', () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 });
+
+describe('the import preview (dry run)', () => {
+  it('proposes categories without writing anything', async () => {
+    // The preview must be side-effect free: nothing in the database before,
+    // nothing after.
+    await db.exec(readFileSync(join(here, '..', 'src', 'db', 'rules-tw.sql'), 'utf8'));
+
+    const items = parseCarrierCsv(CSV).invoices.flatMap((inv, invIdx) =>
+      inv.items
+        .filter((it) => it.amount >= 0)
+        .map((it, i) => ({
+          id: invIdx * 100 + i,
+          itemKey: it.description.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim(),
+          description: it.description,
+          sellerBan: inv.header.sellerBan,
+          sellerName: inv.header.sellerName,
+        })),
+    );
+
+    const before = await count('invoice');
+    const proposals = await categorizePreview(items, { db, kv });
+    const after = await count('invoice');
+
+    expect(after).toBe(before); // no writes
+    expect(proposals.size).toBeGreaterThan(0);
+  });
+
+  it('imports only the invoices named in include', async () => {
+    const result = await importCarrierCsv(CSV, deps(), {
+      ...options,
+      include: new Set(['EX31020263']),
+    });
+    expect(result.run.headers_new).toBe(1);
+    expect(await count('invoice')).toBe(1);
+
+    const row = await db
+      .prepare(`SELECT inv_num FROM invoice`)
+      .first<{ inv_num: string }>();
+    expect(row?.inv_num).toBe('EX31020263');
+  });
+
+  it('an empty include set imports nothing, distinct from omitting it', async () => {
+    const result = await importCarrierCsv(CSV, deps(), { ...options, include: new Set() });
+    expect(result.run.headers_new).toBe(0);
+    expect(await count('invoice')).toBe(0);
+  });
+})

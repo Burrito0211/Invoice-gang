@@ -32,7 +32,7 @@ import {
   verifyPassword,
   verifySession,
 } from './api/auth.js';
-import { handleImport, hasImportToken } from './api/import.js';
+import { handleImport, handleImportPreview, hasImportToken } from './api/import.js';
 import {
   handleCreateOverride,
   handleDeleteOverride,
@@ -102,6 +102,14 @@ async function route(
   if (path === '/api/session' && request.method === 'GET') {
     const ok = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
     return json({ authenticated: ok });
+  }
+
+  // The preview is a dry run — it writes nothing — so it is owner-only and
+  // never opens to the bearer token, which exists purely for the headless
+  // upload path that has no screen to preview onto.
+  if (path === '/api/import/preview' && request.method === 'POST') {
+    await requireOwner(request, env, now);
+    return handleImportPreview(request, env);
   }
 
   // Import is the one route a machine can authenticate to: the watch-folder

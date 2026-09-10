@@ -65,11 +65,22 @@ export const api = {
       body: JSON.stringify({ scope, key, category }),
     }),
 
-  importCsv: (csv: string) =>
-    request<ImportResponse>('/api/import', {
+  importPreview: (csv: string) =>
+    request<ImportPreview>('/api/import/preview', {
       method: 'POST',
       headers: { 'content-type': 'text/csv; charset=utf-8' },
       body: csv,
+    }),
+
+  importCommit: (payload: {
+    csv: string;
+    include: string[];
+    overrides: { item_key: string; category: string }[];
+  }) =>
+    request<ImportResponse>('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
 
   importStatus: () => request<ImportStatus>('/api/import/status'),
@@ -174,7 +185,31 @@ export interface SyncRun {
 export interface ImportResponse {
   run: SyncRun;
   invoices_seen: number;
+  items_corrected?: number;
   masked_invoice_numbers: string[];
+  skipped_rows: { line: number; reason: string }[];
+}
+
+export interface PreviewItem {
+  item_key: string;
+  description: string;
+  net_amount: number;
+  category: string | null;
+  source: string | null;
+}
+
+export interface PreviewInvoice {
+  inv_num: string;
+  inv_date: string;
+  seller_name: string | null;
+  amount: number;
+  masked: boolean;
+  already_imported: boolean;
+  items: PreviewItem[];
+}
+
+export interface ImportPreview {
+  invoices: PreviewInvoice[];
   skipped_rows: { line: number; reason: string }[];
 }
 
