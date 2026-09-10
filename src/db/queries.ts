@@ -445,7 +445,12 @@ export async function listReviewItems(
     conditions.push(`(cache.confidence IS NOT NULL AND cache.confidence < ?)`);
     binds.push(options.threshold);
   }
-  const clause = conditions.length > 0 ? `WHERE ${conditions.join(' OR ')}` : '';
+  // The reason filters are OR'd together, but the discount exclusion applies
+  // to all of them — and AND binds tighter than OR, so without the brackets
+  // `A OR B AND excluded` reads as `A OR (B AND excluded)` and discount rows
+  // come back through the first branch.
+  const reasons = conditions.length > 0 ? `(${conditions.join(' OR ')}) AND ` : '';
+  const clause = `WHERE ${reasons}it.amount >= 0`;
 
   const { results } = await db
     .prepare(
@@ -457,7 +462,7 @@ export async function listReviewItems(
        JOIN invoice i ON i.inv_num = it.inv_num
        LEFT JOIN category c ON c.id = it.category_id
        LEFT JOIN item_category_cache cache ON cache.item_key = it.item_key
-       ${clause ? clause + ' AND it.amount >= 0' : 'WHERE it.amount >= 0'}
+       ${clause}
        ORDER BY COALESCE(it.net_amount, it.amount) DESC
        LIMIT ?`,
     )

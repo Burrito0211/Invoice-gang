@@ -205,7 +205,14 @@ main {
   min-width: 40px;
 }
 
+/*
+ * `display: block` is load-bearing. This is a <span> inside the track, and
+ * unlike the track itself it is not a grid item, so it is not blockified —
+ * an inline element ignores width and height, and the bar renders as an
+ * empty groove.
+ */
 .bar-fill {
+  display: block;
   height: 100%;
   border-radius: 999px;
   background: var(--accent);

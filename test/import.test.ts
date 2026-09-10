@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { CsvFormatError, parseCarrierCsv, parseCsvLine } from '../src/import/csv.js';
 import { importCarrierCsv } from '../src/import/run.js';
 import { handleImportStatus } from '../src/api/status.js';
-import { selectUncategorizedItems } from '../src/db/queries.js';
+import { listReviewItems, selectUncategorizedItems } from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
 import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
 
@@ -292,5 +292,58 @@ describe('discount allocation through an import', () => {
     const queued = await selectUncategorizedItems(db, 100);
     expect(queued.some((r) => r.description.includes('折扣'))).toBe(false);
     expect(queued.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the review queue', () => {
+  beforeEach(async () => {
+    await importCarrierCsv(CSV, deps(), options);
+  });
+
+  it('excludes discount rows whichever reason filter is active', async () => {
+    // AND binds tighter than OR, so an exclusion appended to an OR-joined
+    // clause silently applies to only the last branch. Every combination is
+    // checked because that bug is invisible in three of the four.
+    const combinations = [
+      { uncategorized: true, lowConfidence: false },
+      { uncategorized: false, lowConfidence: true },
+      { uncategorized: true, lowConfidence: true },
+      { uncategorized: false, lowConfidence: false },
+    ];
+
+    for (const combo of combinations) {
+      const rows = (await listReviewItems(db, {
+        ...combo,
+        threshold: 0.6,
+        limit: 100,
+      })) as { description: string; amount: number }[];
+
+      expect(rows.some((r) => r.description.includes('折扣'))).toBe(false);
+      expect(rows.every((r) => r.amount >= 0)).toBe(true);
+    }
+  });
+
+  it('reports the net amount, not the list price', async () => {
+    const rows = (await listReviewItems(db, {
+      uncategorized: true,
+      lowConfidence: false,
+      threshold: 0.6,
+      limit: 100,
+    })) as { description: string; amount: number }[];
+
+    // 大杯拿鐵 is the only line on its invoice, priced NT$59 with a NT$10
+    // discount, so the whole discount lands on it.
+    const item = rows.find((r) => r.description.includes('大杯拿鐵'));
+    expect(item?.amount).toBe(49);
+  });
+
+  it('still returns the items that do need review', async () => {
+    const rows = await listReviewItems(db, {
+      uncategorized: true,
+      lowConfidence: false,
+      threshold: 0.6,
+      limit: 100,
+    });
+    expect(rows.length).toBeGreaterThan(0);
   });
 });
