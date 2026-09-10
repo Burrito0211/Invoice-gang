@@ -64,13 +64,27 @@ button.active {
   color: #fff;
 }
 
-input {
+/*
+ * Text-like inputs only. This used to be a bare `input` selector, which also
+ * painted every checkbox with padding, a border and a surface-coloured
+ * background — rendering them as dead blank boxes with no visible tick, so
+ * ticking one looked like it did nothing at all.
+ */
+input:not([type='checkbox']):not([type='radio']) {
   font: inherit;
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
+}
+
+input[type='checkbox'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: none;
 }
 
 /* ------------------------------------------------------------------ login */

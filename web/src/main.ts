@@ -343,12 +343,16 @@ async function openInvoice(invNum: string): Promise<void> {
       box.closest('tr')?.classList.toggle('excluded', !box.checked);
       try {
         await api.setItemMine(id, box.checked);
-        await renderDashboard();
       } catch (err) {
-        box.checked = !box.checked; // roll the UI back if the write failed
+        // Roll the tick back only when the write itself failed. Refreshing the
+        // chart afterwards is a separate concern: reverting on *its* failure
+        // would undo a change the server had already accepted.
+        box.checked = !box.checked;
         box.closest('tr')?.classList.toggle('excluded', !box.checked);
         flash(err instanceof ApiCallError ? err.message : 'could not update the item');
+        return;
       }
+      await renderDashboard();
     });
   }
 

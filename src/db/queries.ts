@@ -133,11 +133,15 @@ export async function existingInvoiceNumbers(
   invNums: string[],
 ): Promise<Set<string>> {
   if (invNums.length === 0) return new Set();
-  const { results } = await db
-    .prepare(`SELECT inv_num FROM invoice WHERE inv_num IN (${placeholders(invNums.length)})`)
-    .bind(...invNums)
-    .all<{ inv_num: string }>();
-  return new Set((results ?? []).map((r) => r.inv_num));
+  const found = new Set<string>();
+  for (const batch of chunk(invNums)) {
+    const { results } = await db
+      .prepare(`SELECT inv_num FROM invoice WHERE inv_num IN (${placeholders(batch.length)})`)
+      .bind(...batch)
+      .all<{ inv_num: string }>();
+    for (const row of results ?? []) found.add(row.inv_num);
+  }
+  return found;
 }
 
 export async function getInvoice(db: D1Database, invNum: string): Promise<InvoiceRow | null> {
@@ -274,11 +278,15 @@ export function collectInsertedIds(results: D1Result<{ id: number }>[]): number[
 
 export async function getItemsByIds(db: D1Database, ids: number[]): Promise<ItemRow[]> {
   if (ids.length === 0) return [];
-  const { results } = await db
-    .prepare(`SELECT * FROM invoice_item WHERE id IN (${placeholders(ids.length)})`)
-    .bind(...ids)
-    .all<ItemRow>();
-  return results ?? [];
+  const out: ItemRow[] = [];
+  for (const batch of chunk(ids)) {
+    const { results } = await db
+      .prepare(`SELECT * FROM invoice_item WHERE id IN (${placeholders(batch.length)})`)
+      .bind(...batch)
+      .all<ItemRow>();
+    out.push(...(results ?? []));
+  }
+  return out;
 }
 
 export async function getItemsForInvoice(
@@ -392,11 +400,15 @@ export async function getCategorizableItems(
   ids: number[],
 ): Promise<CategorizableRow[]> {
   if (ids.length === 0) return [];
-  const { results } = await db
-    .prepare(`${CATEGORIZABLE_SELECT} WHERE it.id IN (${placeholders(ids.length)}) AND it.amount >= 0`)
-    .bind(...ids)
-    .all<CategorizableRow>();
-  return results ?? [];
+  const out: CategorizableRow[] = [];
+  for (const batch of chunk(ids)) {
+    const { results } = await db
+      .prepare(`${CATEGORIZABLE_SELECT} WHERE it.id IN (${placeholders(batch.length)}) AND it.amount >= 0`)
+      .bind(...batch)
+      .all<CategorizableRow>();
+    out.push(...(results ?? []));
+  }
+  return out;
 }
 
 /**
@@ -711,15 +723,20 @@ export async function getCachedCategories(
   itemKeys: string[],
 ): Promise<{ item_key: string; category_id: number; confidence: number | null }[]> {
   if (itemKeys.length === 0) return [];
-  const { results } = await db
-    .prepare(
-      `SELECT item_key, category_id, confidence
-       FROM item_category_cache
-       WHERE item_key IN (${placeholders(itemKeys.length)})`,
-    )
-    .bind(...itemKeys)
-    .all<{ item_key: string; category_id: number; confidence: number | null }>();
-  return results ?? [];
+  const out: { item_key: string; category_id: number; confidence: number | null }[] = [];
+  // Chunked: an import's worth of keys exceeds D1's bound-parameter limit.
+  for (const batch of chunk(itemKeys)) {
+    const { results } = await db
+      .prepare(
+        `SELECT item_key, category_id, confidence
+         FROM item_category_cache
+         WHERE item_key IN (${placeholders(batch.length)})`,
+      )
+      .bind(...batch)
+      .all<{ item_key: string; category_id: number; confidence: number | null }>();
+    out.push(...(results ?? []));
+  }
+  return out;
 }
 
 export function upsertCacheStatement(
@@ -753,14 +770,20 @@ export function upsertCacheStatement(
     );
 }
 
-export function bumpCacheHitsStatement(db: D1Database, itemKeys: string[]): D1PreparedStatement {
-  return db
-    .prepare(
-      `UPDATE item_category_cache
-       SET hits = hits + 1
-       WHERE item_key IN (${placeholders(itemKeys.length)})`,
-    )
-    .bind(...itemKeys);
+/** Chunked, so a large import does not exceed D1's bound-parameter limit. */
+export function bumpCacheHitsStatements(
+  db: D1Database,
+  itemKeys: string[],
+): D1PreparedStatement[] {
+  return chunk(itemKeys).map((batch) =>
+    db
+      .prepare(
+        `UPDATE item_category_cache
+         SET hits = hits + 1
+         WHERE item_key IN (${placeholders(batch.length)})`,
+      )
+      .bind(...batch),
+  );
 }
 
 /**
@@ -785,10 +808,10 @@ export async function deleteCacheEntriesForMerchant(
     .bind(sellerBan)
     .all<{ item_key: string }>();
   const keys = (results ?? []).map((r) => r.item_key);
-  if (keys.length > 0) {
+  for (const batch of chunk(keys)) {
     await db
-      .prepare(`DELETE FROM item_category_cache WHERE item_key IN (${placeholders(keys.length)})`)
-      .bind(...keys)
+      .prepare(`DELETE FROM item_category_cache WHERE item_key IN (${placeholders(batch.length)})`)
+      .bind(...batch)
       .run();
   }
   return keys;
@@ -1220,6 +1243,23 @@ export async function classifierStats(db: D1Database) {
 
 function placeholders(n: number): string {
   return new Array(n).fill('?').join(', ');
+}
+
+/**
+ * D1 caps the bound parameters in one statement, and an `IN (?, ?, …)` list
+ * built from a whole import blows straight through it — a 279-row export has
+ * ~190 distinct item keys and fails with "too many SQL variables". Every
+ * unbounded `IN` list is therefore issued in chunks and the results
+ * concatenated.
+ *
+ * 80 leaves room for the handful of other binds a statement might carry.
+ */
+const BIND_CHUNK = 80;
+
+export function chunk<T>(items: T[], size = BIND_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 /** `%` and `_` are wildcards in LIKE; a search box must not smuggle them in. */

@@ -15,7 +15,13 @@ import { CsvFormatError, parseCarrierCsv, parseCsvLine } from '../src/import/csv
 import { importCarrierCsv } from '../src/import/run.js';
 import { categorizePreview } from '../src/categorize/pipeline.js';
 import { handleImportStatus } from '../src/api/status.js';
-import { listReviewItems, selectUncategorizedItems } from '../src/db/queries.js';
+import {
+  existingInvoiceNumbers,
+  getCachedCategories,
+  getCategorizableItems,
+  listReviewItems,
+  selectUncategorizedItems,
+} from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
 import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
 
@@ -395,3 +401,33 @@ describe('the import preview (dry run)', () => {
     expect(await count('invoice')).toBe(0);
   });
 })
+
+describe('scale: D1 bound-parameter limits', () => {
+  it('reads the cache for more keys than one statement can bind', async () => {
+    // D1 caps bound parameters per statement, and a real export has ~190
+    // distinct item keys — an unchunked `IN (?, ?, …)` fails outright with
+    // "too many SQL variables". This is the shape that broke it.
+    const keys = Array.from({ length: 250 }, (_, i) => `key-${i}`);
+    const rows = await getCachedCategories(db, keys);
+    expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it('finds existing invoices across more numbers than one statement can bind', async () => {
+    await importCarrierCsv(CSV, deps(), options);
+    const invNums = [
+      ...Array.from({ length: 250 }, (_, i) => `ZZ${String(10_000_000 + i)}`),
+      'EX31020263',
+    ];
+    const found = await existingInvoiceNumbers(db, invNums);
+    expect(found.has('EX31020263')).toBe(true);
+    expect(found.size).toBe(1);
+  });
+
+  it('categorizes an item set larger than one statement can bind', async () => {
+    await importCarrierCsv(CSV, deps(), options);
+    const all = await db.prepare(`SELECT id FROM invoice_item`).all<{ id: number }>();
+    const ids = [...(all.results ?? []).map((r) => r.id), ...Array.from({ length: 250 }, (_, i) => 900000 + i)];
+    const rows = await getCategorizableItems(db, ids);
+    expect(rows.length).toBeGreaterThan(0);
+  });
+});

@@ -16,7 +16,7 @@
  *   4. one batched UPDATE for the whole set.
  */
 import {
-  bumpCacheHitsStatement,
+  bumpCacheHitsStatements,
   getCachedCategories,
   listCategories,
   listItemRules,
@@ -24,7 +24,7 @@ import {
   listOverrides,
   setItemCategoryStatement,
 } from '../db/queries.js';
-import { classifyAndCache, kvKey, type ClassifyOptions, type UnseenItem } from './llm.js';
+import { classifyAndCache, type ClassifyOptions, type UnseenItem } from './llm.js';
 import { resolve, type ItemRule, type MerchantRule, type RuleContext } from './rules.js';
 import type { Category, CategorySource, Unix } from '../types.js';
 
@@ -133,7 +133,7 @@ export async function categorizeItems(
     setItemCategoryStatement(deps.db, a.id, a.categoryId, a.source, now),
   );
   if (cacheHitKeys.length > 0) {
-    writes.push(bumpCacheHitsStatement(deps.db, [...new Set(cacheHitKeys)]));
+    writes.push(...bumpCacheHitsStatements(deps.db, [...new Set(cacheHitKeys)]));
   }
   if (writes.length > 0) await deps.db.batch(writes);
 
@@ -175,9 +175,14 @@ export async function categorizePreview(
 }
 
 /**
- * The free context, loaded once per pass. Cache lookups go to KV first — it is
- * the hot read path — and fall back to the table, which is authoritative and
- * survives a KV namespace being recreated.
+ * The free context, loaded once per pass.
+ *
+ * Cache lookups read the `item_category_cache` table, in chunks, rather than
+ * hitting KV once per key. A real import carries a couple of hundred distinct
+ * item keys, and one KV round trip each is a couple of hundred subrequests in
+ * a single request — well past what a Worker will do, for a cache that a
+ * rules-only setup never populates in the first place. The table is
+ * authoritative anyway; KV remains the write-through mirror `llm.ts` keeps.
  */
 async function loadRuleContext(
   deps: PipelineDeps,
@@ -208,19 +213,7 @@ async function loadRuleContext(
 
   const keys = [...new Set(items.map((i) => i.itemKey))];
   const cache = new Map<string, number>();
-  const idByKey = new Map(categories.map((c) => [c.key, c.id]));
-
-  const kvHits = await Promise.all(
-    keys.map(async (key) => [key, await deps.kv.get(kvKey(key))] as const),
-  );
-  for (const [key, categoryKey] of kvHits) {
-    if (categoryKey === null) continue;
-    const id = idByKey.get(categoryKey);
-    if (id !== undefined) cache.set(key, id);
-  }
-
-  const missing = keys.filter((k) => !cache.has(k));
-  for (const row of await getCachedCategories(deps.db, missing)) {
+  for (const row of await getCachedCategories(deps.db, keys)) {
     cache.set(row.item_key, row.category_id);
   }
 
