@@ -118,6 +118,20 @@ CREATE TABLE merchant_rule (
 
 CREATE INDEX idx_rule_lookup ON merchant_rule(match_type, priority);
 
+-- -------------------------------------------------------------- item rules --
+-- Matches the product description rather than the seller, and outranks
+-- merchant_rule: a phone charger bought at 7-ELEVEN is electronics, not
+-- groceries. `pattern` is a substring of the normalized item_key.
+CREATE TABLE IF NOT EXISTS item_rule (
+    id          INTEGER PRIMARY KEY,
+    pattern     TEXT NOT NULL UNIQUE,
+    category_id INTEGER NOT NULL REFERENCES category(id),
+    priority    INTEGER NOT NULL DEFAULT 100,  -- lower wins
+    note        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_rule_lookup ON item_rule(priority);
+
 -- --------------------------------------------------------------- overrides --
 -- The correction loop. Outranks everything else. Scope item keys on item_key,
 -- scope merchant keys on seller_ban.

@@ -81,6 +81,7 @@ describe('rule matching', () => {
 
 describe('resolution order', () => {
   const ctx = {
+    itemRules: [],
     overrides: new Map([
       ['item:usb 充電線', 90],
       ['merchant:12345678', 91],

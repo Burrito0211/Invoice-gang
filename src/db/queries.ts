@@ -509,6 +509,21 @@ export async function listMerchantRules(db: D1Database) {
   return results ?? [];
 }
 
+/**
+ * Ordered by priority, then longest pattern first: a longer pattern is the
+ * more specific one, so `蒸氣眼罩` answers before `眼罩` gets a chance.
+ */
+export async function listItemRules(db: D1Database) {
+  const { results } = await db
+    .prepare(
+      `SELECT r.pattern, r.category_id, r.priority
+       FROM item_rule r
+       ORDER BY r.priority, length(r.pattern) DESC`,
+    )
+    .all<{ pattern: string; category_id: number; priority: number }>();
+  return results ?? [];
+}
+
 export async function insertMerchantRule(
   db: D1Database,
   rule: { matchType: string; pattern: string; categoryId: number; priority: number; note: string | null },

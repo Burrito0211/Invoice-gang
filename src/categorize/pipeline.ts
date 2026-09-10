@@ -19,12 +19,13 @@ import {
   bumpCacheHitsStatement,
   getCachedCategories,
   listCategories,
+  listItemRules,
   listMerchantRules,
   listOverrides,
   setItemCategoryStatement,
 } from '../db/queries.js';
 import { classifyAndCache, kvKey, type ClassifyOptions, type UnseenItem } from './llm.js';
-import { resolve, type MerchantRule, type RuleContext } from './rules.js';
+import { resolve, type ItemRule, type MerchantRule, type RuleContext } from './rules.js';
 import type { Category, CategorySource, Unix } from '../types.js';
 
 /** What the pipeline needs to know about one item. */
@@ -149,13 +150,20 @@ async function loadRuleContext(
   items: CategorizableItem[],
   categories: Category[],
 ): Promise<RuleContext> {
-  const [overrideRows, ruleRows] = await Promise.all([
+  const [overrideRows, itemRuleRows, ruleRows] = await Promise.all([
     listOverrides(deps.db),
+    listItemRules(deps.db),
     listMerchantRules(deps.db),
   ]);
 
   const overrides = new Map<string, number>();
   for (const o of overrideRows) overrides.set(`${o.scope}:${o.key}`, o.category_id);
+
+  const itemRules: ItemRule[] = itemRuleRows.map((r) => ({
+    pattern: r.pattern,
+    category_id: r.category_id,
+    priority: r.priority,
+  }));
 
   const rules: MerchantRule[] = ruleRows.map((r) => ({
     match_type: r.match_type,
@@ -182,5 +190,5 @@ async function loadRuleContext(
     cache.set(row.item_key, row.category_id);
   }
 
-  return { overrides, rules, cache };
+  return { overrides, itemRules, rules, cache };
 }
