@@ -9,7 +9,13 @@
  */
 import { webcrypto as crypto } from 'node:crypto';
 
-const ITERATIONS = 210_000;
+/**
+ * The Workers runtime rejects PBKDF2 above 100,000 iterations. Node happily
+ * does more, so a larger value here produces a hash that verifies locally and
+ * throws only once deployed. Do not raise it; `MAX_PBKDF2_ITERATIONS` in
+ * src/api/auth.ts is the matching cap on the verifying side.
+ */
+const ITERATIONS = 100_000;
 const password = process.argv[2];
 
 if (!password) {
