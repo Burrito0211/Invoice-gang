@@ -112,7 +112,7 @@ async function renderDashboard(): Promise<void> {
     ),
   ].join('');
 
-  $('chart-category').innerHTML = bars(byCategory.breakdown, (row) => categoryColor(row.key));
+  $('chart-category').innerHTML = bars(byCategory.breakdown, { color: (row) => categoryColor(row.key) });
   $('chart-month').innerHTML = bars(byMonth.breakdown);
   $('chart-merchant').innerHTML = bars(byMerchant.breakdown.slice(0, 12));
 }
@@ -124,35 +124,63 @@ function tile(label: string, value: string): string {
 /**
  * A bar chart is two divs and a percentage. This is the whole charting layer.
  *
- * Every row carries its share of the total alongside the amount, because
+ * Every row carries its share of the total alongside the value, because
  * "NT$1,913" only becomes an answer once you know it is 84% of the month.
- * Bars are scaled against the largest row so the shape is readable; the
- * percentage is against the total, which is the number that means something.
+ *
+ * **The bar length is that same share.** Scaling against the largest row
+ * instead makes the biggest bar always full-width, so a row reading 71.9%
+ * appears completely filled and the picture contradicts the number printed
+ * beside it. One denominator, used for both.
+ *
+ * `format` exists because not every panel counts money — "how items were
+ * classified" counts items, and running those through the currency formatter
+ * turned 9 items into "NT$9".
  */
-function bars(rows: SummaryRow[], color?: (row: SummaryRow) => string): string {
+interface BarOptions {
+  color?: (row: SummaryRow) => string;
+  format?: 'money' | 'count';
+  /** Singular noun for count rows, e.g. "item" → "9 items". */
+  unit?: string;
+}
+
+function bars(rows: SummaryRow[], options: BarOptions = {}): string {
   if (rows.length === 0) return '<p class="muted">Nothing in this range yet.</p>';
 
   const values = rows.map((r) => Number(r.total) || 0);
-  const max = Math.max(...values, 1);
   const total = values.reduce((sum, v) => sum + v, 0);
+  const unit = options.unit ?? 'item';
 
   return `<div class="bars">${rows
     .map((row, index) => {
       const value = values[index] ?? 0;
-      const width = Math.max(1, Math.round((value / max) * 100));
       const share = total === 0 ? 0 : value / total;
-      const fill = color ? color(row) : 'var(--accent)';
+      // A non-zero row always shows something, or a 0.3% slice looks like 0.
+      const width = value === 0 ? 0 : Math.max(1.5, share * 100);
+      const fill = options.color ? options.color(row) : 'var(--accent)';
+      const label =
+        options.format === 'count'
+          ? `${value} ${unit}${value === 1 ? '' : 's'}`
+          : money(value);
       return `<div class="bar-row">
           <span class="bar-label" title="${escape(row.label_en)}">${escape(row.label_en)}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${width}%;background:${escape(fill)}"></span></span>
+          <span class="bar-track"><span class="bar-fill" style="width:${width.toFixed(1)}%;background:${escape(fill)}"></span></span>
           <span class="bar-value">
-            <span class="bar-amount">${escape(money(value))}</span>
+            <span class="bar-amount">${escape(label)}</span>
             <span class="bar-share">${escape(percent(share))}</span>
           </span>
         </div>`;
     })
     .join('')}</div>`;
 }
+
+/** `category_source` values are internal; these are what a person reads. */
+const SOURCE_LABELS: Record<string, string> = {
+  override: 'Your correction',
+  merchant: 'Merchant rule',
+  cache: 'Cached answer',
+  llm: 'Model',
+  none: 'Not yet classified',
+};
 
 function categoryColor(key: string): string {
   return state.categories.find((c) => c.key === key)?.color ?? 'var(--accent)';
@@ -319,10 +347,11 @@ async function renderStats(): Promise<void> {
         ${bars(
           coverage.by_source.map((s) => ({
             key: s.source,
-            label_en: s.source,
+            label_en: SOURCE_LABELS[s.source] ?? s.source,
             total: s.n,
             item_count: s.n,
           })),
+          { format: 'count' },
         )}
       </div>
       <div class="panel">
@@ -347,6 +376,7 @@ async function renderStats(): Promise<void> {
             total: m.n,
             item_count: m.n,
           })),
+          { format: 'count' },
         )}
       </div>
     </div>`;
