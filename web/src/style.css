@@ -482,3 +482,9 @@ tr.excluded td:not(:first-child) {
   opacity: 0.4;
   text-decoration: line-through;
 }
+
+/* The per-item Mine column in the preview: narrow, and never wraps. */
+.preview-invoice td:first-child {
+  width: 1.6rem;
+  padding-right: 0;
+}

@@ -231,12 +231,14 @@ export function insertItemStatement(
   detail: InvoiceDetailRow,
   itemKey: string,
   netAmount: number,
+  excluded = false,
 ): D1PreparedStatement {
   return db
     .prepare(
       `INSERT OR IGNORE INTO invoice_item
-         (inv_num, row_num, description, item_key, quantity, unit_price, amount, net_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (inv_num, row_num, description, item_key, quantity, unit_price, amount,
+          net_amount, excluded)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id`,
     )
     .bind(
@@ -248,6 +250,7 @@ export function insertItemStatement(
       detail.unitPrice,
       detail.amount,
       netAmount,
+      excluded ? 1 : 0,
     );
 }
 

@@ -75,6 +75,7 @@ export const api = {
   importCommit: (payload: {
     csv: string;
     include: string[];
+    exclude_items: { inv_num: string; row_num: number }[];
     overrides: { item_key: string; category: string }[];
   }) =>
     request<ImportResponse>('/api/import', {
@@ -217,6 +218,7 @@ export interface ImportResponse {
 }
 
 export interface PreviewItem {
+  row_num: number;
   item_key: string;
   description: string;
   net_amount: number;

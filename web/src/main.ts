@@ -524,6 +524,8 @@ function openPreview(csv: string, preview: import('./api.js').ImportPreview): vo
       const items = inv.items
         .map(
           (item) => `<tr>
+            <td><input type="checkbox" class="pick-item" checked
+                       data-inv="${escape(inv.inv_num)}" data-row="${item.row_num}" /></td>
             <td>${escape(item.description)}</td>
             <td>${categorySelect(item.item_key, item.category)}</td>
             <td class="num">${escape(money(item.net_amount))}</td>
@@ -554,6 +556,12 @@ function openPreview(csv: string, preview: import('./api.js').ImportPreview): vo
     });
   }
 
+  for (const box of document.querySelectorAll<HTMLInputElement>('#preview-body input.pick-item')) {
+    box.addEventListener('change', () => {
+      box.closest('tr')?.classList.toggle('excluded', !box.checked);
+    });
+  }
+
   const confirm = $<HTMLButtonElement>('preview-confirm');
   confirm.onclick = () => void commitPreview(csv);
   $<HTMLButtonElement>('preview-cancel').onclick = () => $<HTMLDialogElement>('preview').close();
@@ -570,17 +578,24 @@ async function commitPreview(csv: string): Promise<void> {
     return;
   }
 
+  // Lines left unticked are imported but flagged as not the owner's, so the
+  // invoice still reconciles while the spending total ignores them.
+  const excludeItems = [
+    ...document.querySelectorAll<HTMLInputElement>('#preview-body input.pick-item:not(:checked)'),
+  ].map((box) => ({ inv_num: box.dataset.inv ?? '', row_num: Number(box.dataset.row) }));
+
   const overrides = [...previewEdits].map(([item_key, category]) => ({ item_key, category }));
   const confirm = $<HTMLButtonElement>('preview-confirm');
   confirm.disabled = true;
   confirm.textContent = 'Importing…';
 
   try {
-    const result = await api.importCommit({ csv, include, overrides });
+    const result = await api.importCommit({ csv, include, exclude_items: excludeItems, overrides });
     const run = result.run;
     flash(
       `Imported ${include.length} invoice${include.length === 1 ? '' : 's'} — ` +
         `${run.headers_new} new, ${run.items_new} items` +
+        (excludeItems.length > 0 ? `, ${excludeItems.length} not counted` : '') +
         (result.items_corrected ? `, ${result.items_corrected} corrected` : ''),
     );
     $<HTMLDialogElement>('preview').close();

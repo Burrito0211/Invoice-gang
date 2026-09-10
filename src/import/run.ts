@@ -58,6 +58,17 @@ export interface ImportOptions {
    * from omitting the field.
    */
   include?: Set<string>;
+  /**
+   * Line items the owner unticked in the preview, keyed `invNum:rowNum`.
+   * They are still inserted — the invoice total is the sum of its lines and
+   * must reconcile against the paper — but land with `excluded = 1`, so they
+   * are outside every spend total from the moment they arrive.
+   *
+   * Applied only to rows this run actually creates. A re-import never
+   * overwrites the flag on an existing row, because by then it is the owner's
+   * own decision rather than this file's.
+   */
+  excludeItems?: Set<string>;
 }
 
 export interface ImportResult {
@@ -104,7 +115,7 @@ export async function importCarrierCsv(
     windowStart = dates[0] ?? null;
     windowEnd = dates[dates.length - 1] ?? null;
 
-    const newItemIds = await persist(chosen, deps, options.carrierId);
+    const newItemIds = await persist(chosen, deps, options.carrierId, options.excludeItems);
     headersNew = newItemIds.headersNew;
     itemsNew = newItemIds.ids.length;
 
@@ -168,6 +179,7 @@ async function persist(
   invoices: ParsedInvoice[],
   deps: ImportDeps,
   carrierId: number,
+  excludeItems?: Set<string>,
 ): Promise<{ headersNew: number; ids: number[] }> {
   let headersNew = 0;
   const ids: number[] = [];
@@ -195,7 +207,14 @@ async function persist(
 
       const itemResult = await deps.db.batch<{ id: number }>(
         invoice.items.map((item, index) =>
-          insertItemStatement(deps.db, header.invNum, item, itemKey(item.description), net[index]!),
+          insertItemStatement(
+            deps.db,
+            header.invNum,
+            item,
+            itemKey(item.description),
+            net[index]!,
+            excludeItems?.has(`${header.invNum}:${item.rowNum}`) ?? false,
+          ),
         ),
       );
       ids.push(...collectInsertedIds(itemResult));

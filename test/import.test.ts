@@ -21,6 +21,7 @@ import {
   getCategorizableItems,
   listReviewItems,
   selectUncategorizedItems,
+  totalsForRange,
 } from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
 import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
@@ -429,5 +430,65 @@ describe('scale: D1 bound-parameter limits', () => {
     const ids = [...(all.results ?? []).map((r) => r.id), ...Array.from({ length: 250 }, (_, i) => 900000 + i)];
     const rows = await getCategorizableItems(db, ids);
     expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('per-item selection at import time', () => {
+  it('imports an unticked line but marks it not-mine', async () => {
+    // The invoice total must still reconcile against the paper, so the row is
+    // inserted either way — it just does not count as spending.
+    const result = await importCarrierCsv(CSV, deps(), {
+      ...options,
+      excludeItems: new Set(['EX31020263:1']),
+    });
+    expect(result.run.status).toBe('ok');
+
+    const rows = await db
+      .prepare(
+        `SELECT row_num, excluded FROM invoice_item WHERE inv_num = 'EX31020263' ORDER BY row_num`,
+      )
+      .all<{ row_num: number; excluded: number }>();
+
+    expect(rows.results.map((r) => r.excluded)).toEqual([1, 0, 0, 0]);
+    // All four lines are present; the invoice header still sums to 83.
+    const header = await db
+      .prepare(`SELECT amount FROM invoice WHERE inv_num = 'EX31020263'`)
+      .first<{ amount: number }>();
+    expect(header?.amount).toBe(83);
+  });
+
+  it('keeps the excluded line out of the spend total', async () => {
+    const withAll = await importCarrierCsv(CSV, deps(), options);
+    expect(withAll.run.status).toBe('ok');
+    const full = (await totalsForRange(db, '2026-09-01', '2026-09-30'))!.invoice_total;
+
+    // Fresh database, same file, one line unticked.
+    db.close();
+    db = createTestDb();
+    kv = createTestKv();
+    let t = 1_800_000_000;
+    clock = () => (t += 1);
+    await seedCarrier(db, 1_750_000_000);
+    await importCarrierCsv(CSV, deps(), {
+      ...options,
+      excludeItems: new Set(['EX31020263:1']),
+    });
+
+    const trimmed = (await totalsForRange(db, '2026-09-01', '2026-09-30'))!.invoice_total;
+    // Row 1 of that invoice nets to 29 after its share of the discount.
+    expect(full - trimmed).toBe(29);
+  });
+
+  it('never overwrites the flag on a row that already exists', async () => {
+    // Once imported, whether a line is yours is your decision, not the file's.
+    await importCarrierCsv(CSV, deps(), options);
+    await db.prepare(`UPDATE invoice_item SET excluded = 1 WHERE inv_num = 'EX31020263'`).run();
+
+    await importCarrierCsv(CSV, deps(), options);
+
+    const rows = await db
+      .prepare(`SELECT excluded FROM invoice_item WHERE inv_num = 'EX31020263'`)
+      .all<{ excluded: number }>();
+    expect(rows.results.every((r) => r.excluded === 1)).toBe(true);
   });
 });

@@ -113,6 +113,9 @@ export async function handleImportPreview(request: Request, env: Env): Promise<R
       items: purchases.map(({ previewId, item, itemKey: key, net }) => {
         const proposal = proposals.get(previewId);
         return {
+          // (inv_num, row_num) is how a line is named back to the commit —
+          // it is the same key the items table is unique on.
+          row_num: item.rowNum,
           item_key: key,
           description: item.description,
           net_amount: net,
@@ -156,7 +159,7 @@ export async function handleImport(
   // CSV as text/csv and imports the whole file. The preview screen sends a
   // JSON envelope naming which invoices to include and any category the owner
   // corrected before committing.
-  const { csv, include, overrides } = await readCommitBody(request);
+  const { csv, include, excludeItems, overrides } = await readCommitBody(request);
 
   const url = new URL(request.url);
   const trigger: SyncTrigger = url.searchParams.get('trigger') === 'backfill' ? 'backfill' : 'manual';
@@ -165,6 +168,7 @@ export async function handleImport(
     carrierId: carrier.id,
     trigger,
     ...(include ? { include } : {}),
+    ...(excludeItems ? { excludeItems } : {}),
   });
 
   // Apply the owner's corrections after the rows exist. An override outranks
@@ -211,9 +215,12 @@ async function readCsvBody(request: Request): Promise<string> {
  * JSON form carries the CSV verbatim so the importer stays the single parser
  * — the client does not re-serialize the invoices it selected.
  */
-async function readCommitBody(
-  request: Request,
-): Promise<{ csv: string; include?: Set<string>; overrides: CommitOverride[] }> {
+async function readCommitBody(request: Request): Promise<{
+  csv: string;
+  include?: Set<string>;
+  excludeItems?: Set<string>;
+  overrides: CommitOverride[];
+}> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
     return { csv: await readCsvBody(request), overrides: [] };
@@ -228,6 +235,7 @@ async function readCommitBody(
   const envelope = (body ?? {}) as {
     csv?: unknown;
     include?: unknown;
+    exclude_items?: unknown;
     overrides?: unknown;
   };
   if (typeof envelope.csv !== 'string' || envelope.csv.trim() === '') {
@@ -240,6 +248,18 @@ async function readCommitBody(
       ? new Set(envelope.include.filter((v): v is string => typeof v === 'string'))
       : undefined;
 
+  // Lines the owner unticked, keyed the way the importer looks them up.
+  const excludeItems = Array.isArray(envelope.exclude_items)
+    ? new Set(
+        envelope.exclude_items.flatMap((e) => {
+          const row = (e ?? {}) as { inv_num?: unknown; row_num?: unknown };
+          return typeof row.inv_num === 'string' && Number.isInteger(Number(row.row_num))
+            ? [`${row.inv_num}:${Number(row.row_num)}`]
+            : [];
+        }),
+      )
+    : undefined;
+
   const overrides: CommitOverride[] = Array.isArray(envelope.overrides)
     ? envelope.overrides.flatMap((o) => {
         const row = (o ?? {}) as { item_key?: unknown; category?: unknown };
@@ -249,7 +269,12 @@ async function readCommitBody(
       })
     : [];
 
-  return { csv: envelope.csv, ...(include ? { include } : {}), overrides };
+  return {
+    csv: envelope.csv,
+    ...(include ? { include } : {}),
+    ...(excludeItems ? { excludeItems } : {}),
+    overrides,
+  };
 }
 
 /** Constant-time compare so the token cannot be guessed byte by byte. */
