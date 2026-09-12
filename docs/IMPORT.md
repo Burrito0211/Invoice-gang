@@ -38,7 +38,46 @@ log in, click export ─▶ Downloads/
                                                    dashboard
 ```
 
-Your part is two clicks. Everything after the file lands is automatic.
+Everything after the file lands is automatic. Your part is not two clicks —
+that claim was made before anyone had walked the portal. It is the sequence in
+*Getting the file out* below, and it takes about ninety seconds.
+
+### How often
+
+Twice a week, not monthly.
+
+Invoices are not queryable the moment they are issued: by 加值型及非加值型營業稅法
+§32-1 a merchant has until two days after issuing one to file it with the
+platform. That two-day floor is in the data source itself and no design gets
+under it — the old API would not have either.
+
+What that settles is the cadence. Exporting twice a week keeps the data two to
+four days old, which is within about a day of the best achievable, and it is
+the freshness the budget card assumes. `STALE_AFTER_DAYS` is 5 to match: one
+missed export, not one missed month.
+
+### Getting the file out
+
+At 手機條碼專區 → 發票查詢及捐贈, with the date range set and 查詢 pressed:
+
+1. Set 顯示 to **100 筆**. The default is 10, and the selection does not
+   survive paging.
+2. Tick the select-all in the **rightmost** column — the unlabelled one after
+   買方統編.
+3. Press **下載CSV檔**.
+
+> **The left-hand checkbox column is not the download column.** It is
+> `全選`, and it feeds the **捐贈** button at the top of the table. The right-hand
+> one is `invoiceDetailAll`, and that is what 下載CSV檔 reads. Ticking the left
+> column and pressing the wrong button donates the invoices, which cannot be
+> undone and forfeits the prize claim. On a phone the two columns sit at
+> opposite edges of a seven-column table, so this is worth slowing down for.
+
+One more constraint: **每次查詢區間須為同1個月** — a single query cannot span two
+calendar months. It limits the range of one query, not how often you run one,
+so a twice-weekly export of the current month-to-date is exactly what the form
+already defaults to. History reaches back four 期 in even months and five in
+odd (a 期 is two months), so backfilling means one query per month.
 
 ### Why not automate the login too
 

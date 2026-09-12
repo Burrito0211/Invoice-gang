@@ -380,6 +380,52 @@ export async function incomeTotalForRange(
   return row?.total ?? 0;
 }
 
+// ------------------------------------------------------------------ budget
+
+export interface BudgetRow {
+  month: string;
+  amount: number;
+}
+
+/**
+ * The budget in force for `month` — the newest row at or before it.
+ *
+ * A month with no row of its own is not unbudgeted; it inherits. That is what
+ * makes the figure something you set once rather than a monthly chore, and it
+ * is why `month` is stored at all: the rows are change points, so August is
+ * still judged against August's number after September's has been set.
+ */
+export async function getEffectiveBudget(db: D1Database, month: string): Promise<BudgetRow | null> {
+  return db
+    .prepare(`SELECT month, amount FROM budget WHERE month <= ? ORDER BY month DESC LIMIT 1`)
+    .bind(month)
+    .first<BudgetRow>();
+}
+
+export async function upsertBudget(
+  db: D1Database,
+  entry: { month: string; amount: number; now: Unix },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO budget (month, amount, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (month) DO UPDATE SET amount = excluded.amount, updated_at = excluded.updated_at`,
+    )
+    .bind(entry.month, entry.amount, entry.now, entry.now)
+    .run();
+}
+
+/**
+ * Removes one change point. The month then inherits from the row before it
+ * again, so this undoes a budget change rather than leaving the month with no
+ * budget at all — unless it was the only row.
+ */
+export async function deleteBudget(db: D1Database, month: string): Promise<boolean> {
+  const result = await db.prepare(`DELETE FROM budget WHERE month = ?`).bind(month).run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
 /** An item plus the merchant context the cascade needs to classify it. */
 export interface CategorizableRow {
   id: number;

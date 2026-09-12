@@ -225,6 +225,19 @@ CREATE TABLE IF NOT EXISTS income (
 
 CREATE INDEX IF NOT EXISTS idx_income_date ON income(date DESC);
 
+-- ----------------------------------------------------------------- budget --
+-- One row per month, but a month without a row is not unbudgeted: the
+-- effective budget for a month is the newest row at or before it, so setting
+-- the figure once carries it forward until another row supersedes it. Keyed
+-- by month rather than held as a single settings row so that changing the
+-- budget does not retroactively rejudge every month you already lived.
+CREATE TABLE IF NOT EXISTS budget (
+    month       TEXT PRIMARY KEY,     -- YYYY-MM, the month it takes effect
+    amount      INTEGER NOT NULL,     -- NT$, positive
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
 -- -------------------------------------------------------------- dashboard --
 -- Monthly spend by category. Defined here so the API layer has no aggregation
 -- SQL of its own to drift out of sync.

@@ -45,10 +45,19 @@ log in, click export ─▶ Downloads/
                                                    dashboard
 ```
 
-Your part is two clicks; everything after the file lands is automatic. The
-portal login is *not* automated — it sits behind bot management, and getting
-past that is out of scope. `docs/IMPORT.md` has the full picture, including
-the file format and the three things about it that are not obvious.
+Everything after the file lands is automatic. Your part is a ninety-second
+visit to the portal, twice a week — set the range, query, switch the page size
+to 100, tick the right-hand select-all, download. The portal login is *not*
+automated: it sits behind bot management, and getting past that is out of
+scope. `docs/IMPORT.md` has the full picture, including the file format, the
+three things about it that are not obvious, and the checkbox column that
+donates your invoices if you tick the wrong one.
+
+Twice a week is not a compromise forced by the missing API. A merchant has two
+days to file an invoice with the platform, so the data has a legal floor of
+0–48 hours whoever is reading it; the API would have made the export
+*automatic*, never *live*. Two exports a week land within about a day of the
+best any design could do.
 
 `docs/SYNC.md` and `docs/EINVOICE-API.md` describe the original API design.
 They are kept, marked superseded, because the reasoning in them still explains
@@ -104,6 +113,31 @@ overhead, so a batch of 50 is roughly 20–40× cheaper per item).
 Every key the model returns is validated against the `category` table. An
 unrecognized key is a bug, not a new category.
 
+### Knowing what is left
+
+Everything above records what happened. A budget is the one number here that
+points forwards, and without it the dashboard can only ever answer *what did I
+spend* — never *what can I still spend*, which is the question the data was
+being collected to answer in the first place.
+
+One figure per month, and the month inherits it: setting NT$20,000 in September
+budgets every later month at NT$20,000 until another row supersedes it. The
+table stores change points rather than one current value, which is what keeps
+August judged against August's budget after September's has been set.
+
+The card draws two marks on one track — the share of the budget spent, and the
+share of the month gone. Sixty-two percent spent is neither good nor bad until
+you know whether the month is a third or nine-tenths over, so the comparison is
+drawn rather than left for the reader to do. `over` and `projected_over` are
+separate states because they ask for different things: one is a stop, the other
+is a slow down.
+
+The arithmetic is in `budget/pace.ts` and is pure, for the same reason
+`import/csv.ts` is: it is arithmetic with an edge case at every month boundary
+— the last day, a month not yet started, a finished month that must not be
+projected past what it actually cost — and those are only testable when
+nothing else is in the room.
+
 ### The correction loop
 
 Clicking a category writes a `user_override` and **re-resolves every affected
@@ -132,9 +166,14 @@ longer exists.
 ### Staleness, because silence is the failure mode
 
 The cron trigger no longer fetches anything. It checks how old the data is and
-notifies past ten days, and the dashboard shows a banner for the same
+notifies past five days, and the dashboard shows a banner for the same
 condition. Without it you simply stop importing, nothing errors, and the chart
 quietly stops moving.
+
+Five days, not the ten it started at. Ten was tuned for a chart you glance at.
+A budget is something you make a decision against, and a decision made on
+ten-day-old spending is a decision made on the wrong number — so the threshold
+now means one missed export rather than one missed fortnight.
 
 ---
 
@@ -206,10 +245,14 @@ npm run typecheck
 
 ## Deliberately not built
 
-Multi-user, bank and card import, budgets and goals, manual expense entry, and
-a native mobile app. `docs/SPEC.md` explains each; they are decisions, not a
-backlog. Manual entry is worth restating: if it needs typing it will not get
-used, and the whole premise was that it does not.
+Multi-user, bank and card import, envelopes and per-category caps and goals,
+manual expense entry, and a native mobile app. `docs/SPEC.md` explains each;
+they are decisions, not a backlog. Manual entry is worth restating: if it needs
+typing it will not get used, and the whole premise was that it does not.
+
+One of those decisions was reversed. Budgets were originally ruled out with the
+rest of the personal-finance feature set; a single monthly total is now in, and
+`SPEC.md` records why.
 
 ## Documents
 

@@ -59,6 +59,17 @@ export const api = {
 
   stats: () => request<StatsResponse>('/api/stats'),
 
+  // The budget is addressed by month, not by the dashboard's date range —
+  // it is a property of the month, and PUT answers with the same shape as
+  // GET so setting a figure shows what it implies without a second call.
+  budget: (month: string) => request<BudgetPace>(`/api/budget?month=${month}`),
+
+  setBudget: (month: string, amount: number) =>
+    request<BudgetPace>('/api/budget', {
+      method: 'PUT',
+      body: JSON.stringify({ month, amount }),
+    }),
+
   categorize: (scope: 'item' | 'merchant', key: string, category: string) =>
     request<{ items_updated: number }>('/api/categorize', {
       method: 'POST',
@@ -239,6 +250,29 @@ export interface PreviewInvoice {
 export interface ImportPreview {
   invoices: PreviewInvoice[];
   skipped_rows: { line: number; reason: string }[];
+}
+
+/**
+ * Everything the budget card shows. Amounts are NT$ integers, as everywhere.
+ * The nullable fields are null for exactly one reason each: no budget set, or
+ * no days left to spread the remainder over.
+ */
+export interface BudgetPace {
+  month: string;
+  amount: number | null;
+  spent: number;
+  remaining: number | null;
+  days_in_month: number;
+  days_elapsed: number;
+  days_left: number;
+  allowed_per_day: number | null;
+  pace_per_day: number;
+  remaining_per_day: number | null;
+  projected: number;
+  over_by: number | null;
+  status: 'unset' | 'over' | 'projected_over' | 'on_track';
+  /** The month whose row supplied the figure; different means carried forward. */
+  effective_from: string | null;
 }
 
 export interface ImportStatus {

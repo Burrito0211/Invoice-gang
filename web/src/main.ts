@@ -9,7 +9,7 @@
  * server.
  */
 import { api, ApiCallError } from './api.js';
-import type { Category, InvoiceSummary, ReviewItem, SummaryRow } from './api.js';
+import type { BudgetPace, Category, InvoiceSummary, ReviewItem, SummaryRow } from './api.js';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -181,6 +181,151 @@ async function renderDashboard(): Promise<void> {
   $('chart-category').innerHTML = bars(byCategory.breakdown, { color: (row) => categoryColor(row.key) });
   $('chart-month').innerHTML = bars(byMonth.breakdown);
   $('chart-merchant').innerHTML = bars(byMerchant.breakdown.slice(0, 12));
+
+  await renderBudget();
+}
+
+/**
+ * The budget card.
+ *
+ * The bar carries two marks rather than one: how much of the budget is gone,
+ * and how far through the month you are. Sixty-two percent spent is neither
+ * good nor bad until you know whether the month is a third or nine-tenths
+ * over, so the comparison is drawn instead of being left for the reader to do.
+ *
+ * A budget is a property of a month, not of the dashboard's arbitrary range,
+ * so the card follows the month of the range's end date and says which month
+ * it is showing.
+ */
+async function renderBudget(): Promise<void> {
+  const month = state.to.slice(0, 7);
+  const card = $('budget');
+
+  let budget: BudgetPace;
+  try {
+    budget = await api.budget(month);
+  } catch {
+    card.hidden = true; // a budget failure must not take the charts with it
+    return;
+  }
+
+  card.hidden = false;
+  card.innerHTML = budget.amount === null ? budgetPrompt(budget) : budgetCard(budget);
+  bindBudget(month);
+}
+
+function budgetPrompt(budget: BudgetPace): string {
+  return `<div class="budget-head">
+      <h2>No budget for ${escape(monthName(budget.month))}</h2>
+      <span class="muted">${escape(money(budget.spent))} spent so far</span>
+    </div>
+    <p class="hint">
+      Set it once — it carries forward to every later month until you change it.
+    </p>
+    ${budgetForm(null)}`;
+}
+
+function budgetCard(budget: BudgetPace): string {
+  const amount = budget.amount ?? 0;
+  const share = amount === 0 ? 0 : budget.spent / amount;
+  const monthShare = budget.days_elapsed / budget.days_in_month;
+
+  const carried =
+    budget.effective_from !== null && budget.effective_from !== budget.month
+      ? `<span class="tag">carried forward from ${escape(monthName(budget.effective_from))}</span>`
+      : '';
+
+  return `<div class="budget-head">
+      <h2>${escape(monthName(budget.month))} budget ${carried}</h2>
+      <span class="muted">${
+        budget.days_left === 0 ? 'month over' : `${budget.days_left} days left`
+      }</span>
+    </div>
+    <div class="budget-figures">
+      <strong>${escape(money(budget.spent))}</strong>
+      <span class="muted">of ${escape(money(amount))}</span>
+      <span class="grow"></span>
+      <button id="budget-edit" class="linky">Edit</button>
+    </div>
+    <div class="budget-track ${escape(budget.status)}">
+      <span class="budget-fill" style="width:${(Math.min(share, 1) * 100).toFixed(1)}%"></span>
+      <span class="budget-today" style="left:${(monthShare * 100).toFixed(1)}%"
+            title="${budget.days_elapsed} of ${budget.days_in_month} days gone"></span>
+    </div>
+    <p class="budget-lines ${escape(budget.status)}">${budgetSentence(budget)}</p>
+    ${budgetForm(amount)}`;
+}
+
+/**
+ * One sentence, and which one depends on the only distinction that changes
+ * what you would do: already over the budget, heading over it, or fine.
+ */
+function budgetSentence(budget: BudgetPace): string {
+  const over = budget.over_by ?? 0;
+
+  if (budget.days_left === 0) {
+    const remaining = budget.remaining ?? 0;
+    return remaining < 0
+      ? `Finished ${escape(money(-remaining))} over.`
+      : `Finished ${escape(money(remaining))} under.`;
+  }
+
+  if (budget.status === 'over') {
+    return `<strong>${escape(money(-(budget.remaining ?? 0)))} over budget</strong>
+      with ${budget.days_left} day${budget.days_left === 1 ? '' : 's'} still to go.`;
+  }
+
+  const perDay =
+    budget.remaining_per_day === null
+      ? ''
+      : `<strong>${escape(money(budget.remaining_per_day))} a day</strong> left to spend,
+         against ${escape(money(budget.pace_per_day))} a day so far. `;
+
+  return budget.status === 'projected_over'
+    ? `${perDay}At this rate ${escape(money(budget.projected))} by month end —
+       ${escape(money(over))} over.`
+    : `${perDay}On track for ${escape(money(budget.projected))}.`;
+}
+
+/** Hidden until Edit is pressed once a figure exists; the only way in when it does not. */
+function budgetForm(amount: number | null): string {
+  return `<form class="budget-form" id="budget-form"${amount === null ? '' : ' hidden'}>
+      <input id="budget-amount" type="number" min="1" step="1" inputmode="numeric"
+             placeholder="Monthly budget NT$" value="${amount ?? ''}" required />
+      <button type="submit" class="upload">${amount === null ? 'Set budget' : 'Save'}</button>
+    </form>`;
+}
+
+function bindBudget(month: string): void {
+  document.getElementById('budget-edit')?.addEventListener('click', () => {
+    const form = $('budget-form');
+    form.hidden = !form.hidden;
+    if (!form.hidden) $<HTMLInputElement>('budget-amount').focus();
+  });
+
+  $<HTMLFormElement>('budget-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const amount = Number($<HTMLInputElement>('budget-amount').value);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      flash('Budget must be a whole number of NT$.');
+      return;
+    }
+    try {
+      await api.setBudget(month, amount);
+      flash(`Budget for ${monthName(month)} set to ${money(amount)}.`);
+      await renderBudget();
+    } catch (err) {
+      flash(err instanceof ApiCallError ? err.message : 'could not set the budget');
+    }
+  });
+}
+
+function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 function tile(label: string, value: string): string {

@@ -32,6 +32,11 @@ import {
   verifyPassword,
   verifySession,
 } from './api/auth.js';
+import {
+  handleDeleteBudget,
+  handleGetBudget,
+  handleSetBudget,
+} from './api/budget.js';
 import { handleImport, handleImportPreview, hasImportToken } from './api/import.js';
 import {
   handleCreateIncome,
@@ -55,8 +60,15 @@ import { handleImportStatus } from './api/status.js';
 import { ApiError, errorResponse, json } from './api/respond.js';
 import type { Env } from './types.js';
 
-/** Data older than this is stale enough to be worth a nudge. */
-const STALE_AFTER_DAYS = 10;
+/**
+ * Data older than this is stale enough to be worth a nudge.
+ *
+ * Five days, not ten. Ten was tuned for a dashboard you glance at; a budget
+ * is something you make a decision against, and a decision made on ten-day-old
+ * spending is made on the wrong number. Twice-weekly exports keep the data
+ * two to four days old, so five days means exactly one missed export.
+ */
+const STALE_AFTER_DAYS = 5;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -144,6 +156,16 @@ async function route(
   if (path === '/api/categories') return handleListCategories(env.DB);
   if (path === '/api/overrides') return handleListOverrides(env.DB);
   if (path === '/api/prizes') return handlePrizes(env.DB, url, today);
+
+  // The budget is monthly, so it is addressed by month rather than by the
+  // dashboard's arbitrary from/to range. GET and PUT share a path because
+  // they describe the same thing, and both answer with the full pacing view
+  // so setting a figure immediately shows what it implies.
+  if (path === '/api/budget') {
+    if (request.method === 'GET') return handleGetBudget(env.DB, url, today);
+    if (request.method === 'PUT') return handleSetBudget(env.DB, request, url, today, now);
+    if (request.method === 'DELETE') return handleDeleteBudget(env.DB, url, today);
+  }
 
   if (path === '/api/income') {
     if (request.method === 'GET') return handleListIncome(env.DB, url, today);

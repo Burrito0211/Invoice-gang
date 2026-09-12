@@ -54,15 +54,31 @@ These are not "later" — they are decisions to not build:
 - **Bank / credit card import.** No usable open-banking API; would mean
   screen-scraping or CSV babysitting, and it dilutes the one genuinely
   interesting data source.
-- **Budgets, envelopes, goals, alerts on overspend.** Standard personal-finance
-  app features, none of which need this data pipeline to exist. They are how
-  this project turns into a half-finished Mint clone.
+- **Envelopes, per-category caps, goals, overspend alerts.** A single monthly
+  total is now in — see *Reversed* below — and the rest of the standard
+  personal-finance feature set stays out. Envelopes and goals are where this
+  turns into a half-finished Mint clone, and an alert fired on data that is
+  two days old by law is a false alarm waiting to happen.
 - **Manual expense entry.** If it needs typing, it will not be used, and the
   whole premise was that it does not.
 - **Mobile app.** A responsive web page reached from a phone home screen is
   indistinguishable in practice.
 - **Receipts without an e-invoice.** Traditional paper 紙本發票 not on the
   carrier are out. Coverage is imperfect and that is acceptable.
+
+## Reversed
+
+- **A single monthly budget** (2026-09-12). Originally ruled out with the rest
+  of the personal-finance feature set, on the grounds that none of it needs
+  this data pipeline to exist. That was true and beside the point: without a
+  budget the app only ever answers what was spent, never what is left, and
+  "what is left" is the question the data was being collected to answer.
+  Nearly abandoning the project over that gap is what surfaced the mistake.
+
+  One figure per month, carried forward until changed, shown against how far
+  through the month you are. `budget/pace.ts` is pure, the table stores change
+  points rather than one current value so a past month keeps the budget it was
+  actually lived under, and nothing else from that bullet came with it.
 
 ## Success criteria
 

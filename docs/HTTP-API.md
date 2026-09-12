@@ -53,6 +53,22 @@ GET /api/prizes?period=
 ```
 Winning numbers for the period and any `prize_hit` rows against them.
 
+```
+GET /api/budget?month=YYYY-MM
+```
+The month's budget and what it implies: `amount`, `spent`, `remaining`,
+`days_elapsed`, `days_left`, `pace_per_day`, `remaining_per_day`, `projected`,
+`over_by`, and a `status` of `unset` | `on_track` | `projected_over` | `over`.
+Defaults to the current month.
+
+`amount` is `null` when no budget has ever been set at or before this month —
+distinct from zero, which would be a budget of nothing. `effective_from` names
+the month whose row supplied the figure; different from `month` means it was
+carried forward rather than set deliberately, and the UI says so.
+
+`status` separates `over` from `projected_over` because they ask for different
+things: one is a stop, the other is a slow down.
+
 ## Write
 
 ```
@@ -69,6 +85,19 @@ DELETE /api/categorize
   { "scope": "...", "key": "..." }
 ```
 Removes an override and re-resolves the affected items back down the cascade.
+
+```
+PUT /api/budget
+  { "amount": 20000, "month": "2026-09" }
+```
+Sets the monthly budget. `month` defaults to the current one. Writing a month
+creates the change point that every later month inherits from, so setting it
+once in September also budgets October — a month with no row of its own is not
+unbudgeted, it looks backwards for the newest row at or before it.
+
+Answers with the same shape as the GET, so setting a figure immediately shows
+what it implies without a second call. `DELETE /api/budget?month=` removes one
+change point, and the month falls back to the row before it.
 
 ```
 POST /api/import/preview

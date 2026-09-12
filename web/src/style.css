@@ -11,6 +11,8 @@
   --muted: #6d675e;
   --accent: #3d85c6;
   --danger: #e06666;
+  --ok: #6aa84f;
+  --warn: #e69138;
   --radius: 10px;
   color-scheme: light dark;
 }
@@ -487,4 +489,145 @@ tr.excluded td:not(:first-child) {
 .preview-invoice td:first-child {
   width: 1.6rem;
   padding-right: 0;
+}
+
+/* ---------------------------------------------------------------- budget */
+
+/*
+ * The only forward-looking thing on the page, so it sits above the totals
+ * rather than among them: the tiles say what happened, this says what is
+ * left.
+ */
+.budget {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.budget-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.budget-head h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0;
+}
+
+.budget-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-figures strong {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.budget-figures .grow {
+  flex: 1;
+}
+
+/* A button that reads as a link — Edit is not a peer of Import CSV. */
+.linky {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+  padding: 0.1rem 0.3rem;
+  text-decoration: underline;
+}
+
+.linky:hover {
+  color: var(--accent);
+}
+
+/*
+ * Two marks on one track. The fill is the share of the budget spent; the
+ * tick is the share of the month gone. Fill behind tick means "ahead of
+ * schedule" at a glance, without reading either number.
+ */
+.budget-track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  overflow: hidden;
+}
+
+.budget-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.budget-track.on_track .budget-fill {
+  background: var(--ok);
+}
+
+.budget-track.projected_over .budget-fill {
+  background: var(--warn);
+}
+
+.budget-track.over .budget-fill {
+  background: var(--danger);
+}
+
+.budget-today {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-1px);
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+}
+
+.budget-lines {
+  margin: 0.6rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.budget-lines strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.budget-lines.over strong {
+  color: var(--danger);
+}
+
+.budget-lines.projected_over strong {
+  color: var(--warn);
+}
+
+.budget-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.budget-form input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+/* The carried-forward note sits inside an uppercased heading; it is prose. */
+.budget-head .tag {
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 0.35rem;
 }
