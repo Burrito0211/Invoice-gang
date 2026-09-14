@@ -13,11 +13,17 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!--
+      Static strings live here as `data-i18n` keys rather than as English, so a
+      phrase has exactly one home and no screen can end up half-translated.
+      `applyStaticStrings()` fills them on boot and again on every language
+      change. See web/src/i18n.ts.
+    -->
     <div id="login" class="login" hidden>
       <form id="login-form">
         <h1>Invoice Gang</h1>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Password" />
-        <button type="submit">Sign in</button>
+        <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="login.password" />
+        <button type="submit" data-i18n="action.signIn"></button>
         <p id="login-error" class="error" hidden></p>
       </form>
     </div>
@@ -26,17 +32,19 @@
       <header class="topbar">
         <h1>Invoice Gang</h1>
         <nav>
-          <button data-view="dashboard" class="active">Spend</button>
-          <button data-view="invoices">Invoices</button>
-          <button data-view="income">Income</button>
-          <button data-view="review">Review</button>
-          <button data-view="stats">Stats</button>
+          <button data-view="dashboard" class="active" data-i18n="nav.spend"></button>
+          <button data-view="invoices" data-i18n="nav.invoices"></button>
+          <button data-view="income" data-i18n="nav.income"></button>
+          <button data-view="review" data-i18n="nav.review"></button>
+          <button data-view="stats" data-i18n="nav.stats"></button>
         </nav>
         <div class="range">
           <input id="from" type="date" />
           <input id="to" type="date" />
-          <label class="upload" for="csv">Import CSV</label>
+          <label class="upload" id="csv-label" for="csv" data-i18n="action.importCsv"></label>
           <input id="csv" type="file" accept=".csv,text/csv" hidden />
+          <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
+          <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
         </div>
       </header>
 
@@ -48,46 +56,40 @@
           <div class="totals" id="totals"></div>
           <div class="panels">
             <div class="panel">
-              <h2>By category</h2>
+              <h2 data-i18n="panel.byCategory"></h2>
               <div id="chart-category"></div>
             </div>
             <div class="panel">
-              <h2>By month</h2>
+              <h2 data-i18n="panel.byMonth"></h2>
               <div id="chart-month"></div>
             </div>
             <div class="panel">
-              <h2>Top merchants</h2>
+              <h2 data-i18n="panel.topMerchants"></h2>
               <div id="chart-merchant"></div>
             </div>
           </div>
         </section>
 
         <section id="view-invoices" class="view" hidden>
-          <input id="search" type="search" placeholder="Search merchants and item descriptions…" />
+          <input id="search" type="search" data-i18n-placeholder="search.placeholder" />
           <div id="invoice-list"></div>
-          <button id="load-more" hidden>Load more</button>
+          <button id="load-more" data-i18n="action.loadMore" hidden></button>
         </section>
 
         <section id="view-income" class="view" hidden>
-          <p class="hint">
-            The one place here you type a number by hand. Everything else is read
-            from your invoices; income has no invoice, so it is entered directly.
-          </p>
+          <p class="hint" data-i18n="income.hint"></p>
           <form id="income-form" class="income-form">
             <input id="income-date" type="date" required />
-            <input id="income-amount" type="number" min="1" step="1" placeholder="Amount NT$" required />
-            <input id="income-source" type="text" placeholder="Source, e.g. 薪資" required />
-            <input id="income-note" type="text" placeholder="Note (optional)" />
-            <button type="submit" class="upload">Add income</button>
+            <input id="income-amount" type="number" min="1" step="1" data-i18n-placeholder="income.amount" required />
+            <input id="income-source" type="text" data-i18n-placeholder="income.source" required />
+            <input id="income-note" type="text" data-i18n-placeholder="income.note" />
+            <button type="submit" class="upload" data-i18n="action.addIncome"></button>
           </form>
           <div id="income-list"></div>
         </section>
 
         <section id="view-review" class="view" hidden>
-          <p class="hint">
-            Uncategorized and low-confidence items, most expensive first — fixing these is the
-            fastest route to an accurate chart.
-          </p>
+          <p class="hint" data-i18n="review.hint"></p>
           <div id="review-list"></div>
         </section>
 
@@ -96,17 +98,20 @@
         </section>
       </main>
 
-      <dialog id="detail"><div id="detail-body"></div><button id="detail-close">Close</button></dialog>
+      <dialog id="detail">
+        <div id="detail-body"></div>
+        <button id="detail-close" data-i18n="action.close"></button>
+      </dialog>
 
       <dialog id="preview">
         <div class="preview-head">
-          <h2>Review before importing</h2>
+          <h2 data-i18n="preview.title"></h2>
           <p id="preview-summary" class="muted"></p>
         </div>
         <div id="preview-body"></div>
         <div class="preview-actions">
-          <button id="preview-cancel">Cancel</button>
-          <button id="preview-confirm" class="upload">Import selected</button>
+          <button id="preview-cancel" data-i18n="action.cancel"></button>
+          <button id="preview-confirm" class="upload" data-i18n="action.importSelected"></button>
         </div>
       </dialog>
     </div>

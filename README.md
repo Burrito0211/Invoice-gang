@@ -138,6 +138,30 @@ The arithmetic is in `budget/pace.ts` and is pure, for the same reason
 projected past what it actually cost — and those are only testable when
 nothing else is in the room.
 
+### Two languages, one set of phrases
+
+The interface is Traditional Chinese and English, toggled from the header the
+way the MOF portal does it — the button shows the language you would switch
+*to*, which a flag or a globe icon never manages to say. Chinese is the default
+whenever the browser asks for any Chinese, because the data is Taiwanese: every
+merchant name and product description arrives in Chinese regardless, and an
+English frame around Chinese content reads worse than either language alone.
+
+Static markup stores `data-i18n` keys rather than English text, so a phrase has
+exactly one home. Category names come from the `category` table, which has
+carried `label_zh` and `label_en` since the first schema.
+
+The interesting part is the split. `strings.ts` is the two dictionaries and a
+resolver and touches nothing — no DOM, no `localStorage`, no module state.
+`i18n.ts` owns all of that. This is not tidiness: at runtime a missing
+translation falls back to English and the page works fine, so a half-translated
+screen never announces itself. Only a test catches it, and a test cannot import
+a module that reaches for `document`. So `test/i18n.test.ts` asserts the two
+dictionaries have identical keys, that every key used in the markup and in the
+dashboard exists in both, and that a sentence carrying `{amount}` and `{n}`
+carries both in either language — a translation that silently drops a number is
+the failure that would otherwise ship.
+
 ### The correction loop
 
 Clicking a category writes a `user_override` and **re-resolves every affected
@@ -185,9 +209,12 @@ src/
   import/              CSV → domain types (pure), then persist + categorize
   categorize/          normalize → rules (pure) → llm (the one impure step)
   prizes/              matching by prize class
+  budget/              monthly budget arithmetic (pure)
   api/                 HTTP handlers, one file per resource
   db/queries.ts        every SQL statement in the project
 web/                   dashboard, built by Vite into dist/
+  src/strings.ts       zh-Hant and en phrases (pure)
+  src/i18n.ts          current language and the markup pass
 scripts/               watch-folder uploader, password hasher
 ```
 

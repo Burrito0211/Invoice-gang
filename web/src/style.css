@@ -631,3 +631,25 @@ tr.excluded td:not(:first-child) {
   letter-spacing: 0;
   margin-left: 0.35rem;
 }
+
+/* ------------------------------------------------------------- language */
+
+/*
+ * The toggle shows the language you would switch *to*, the way the MOF portal
+ * does — a button reading 中文 while the page is in English is unambiguous in
+ * a way that a flag or a globe icon is not.
+ *
+ * It reads as a link rather than a button because it is a preference, not an
+ * action, and it should not compete with Import CSV beside it.
+ */
+#lang {
+  align-self: center;
+  min-width: 2.5rem;
+  white-space: nowrap;
+}
+
+/* Five nav items and four range controls do not fit one phone-width row. */
+.topbar nav,
+.topbar .range {
+  flex-wrap: wrap;
+}

@@ -63,14 +63,24 @@ src/
   prizes/
     fetch.ts           winning number list
     match.ts           number matching by prize class
+  budget/
+    pace.ts            monthly budget arithmetic, pure
   api/                 HTTP handlers, one file per resource
   db/
     schema.sql         mirrors SCHEMA.sql in this bundle
     queries.ts         all SQL lives here, nowhere else
 web/                   dashboard, built by Vite into dist/
+  src/strings.ts       zh-Hant and en phrase tables, pure
+  src/i18n.ts          current language, persistence, static markup
 ```
 
 ## Boundaries that matter
+
+**The phrase tables never touch the DOM.** `web/src/strings.ts` is data and a
+resolver; `web/src/i18n.ts` owns the current language, the `localStorage` write
+and the markup pass. The split is not tidiness — a half-translated screen falls
+back to English at runtime rather than failing, so the only thing that catches
+it is a test, and a test cannot import a module that reaches for `document`.
 
 **All SQL in `db/queries.ts`.** No query strings anywhere else. It makes the
 data access auditable in one file and it is the thing that rots fastest if

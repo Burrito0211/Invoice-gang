@@ -7,8 +7,13 @@
  * which is the honest shape for "category totals for a month", and a bar is
  * two divs. Money arrives as an integer and is formatted here, never by the
  * server.
+ *
+ * Every string a person reads comes from `i18n.ts`. The interpolations are
+ * still escaped at the call site, because `t()` deliberately does not escape —
+ * see the note at the top of that file.
  */
 import { api, ApiCallError } from './api.js';
+import { applyStaticStrings, label, locale, monthName, setLocale, t } from './i18n.js';
 import type { BudgetPace, Category, InvoiceSummary, ReviewItem, SummaryRow } from './api.js';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -20,6 +25,8 @@ const state = {
   cursor: null as string | null,
   invoices: [] as InvoiceSummary[],
   search: '',
+  /** Tracked so a language change can re-render whatever is on screen. */
+  view: 'dashboard',
 };
 
 // --------------------------------------------------------------------- boot
@@ -27,6 +34,8 @@ const state = {
 void start();
 
 async function start(): Promise<void> {
+  setLocale(locale()); // stamps <html lang> from the stored or detected choice
+  applyStaticStrings();
   const { authenticated } = await api.session();
   if (!authenticated) return showLogin();
   await showApp();
@@ -43,7 +52,7 @@ function showLogin(): void {
       $('login').hidden = true;
       await showApp();
     } catch (err) {
-      error.textContent = err instanceof ApiCallError ? err.message : 'sign in failed';
+      error.textContent = err instanceof ApiCallError ? err.message : t('login.failed');
       error.hidden = false;
     }
   });
@@ -67,6 +76,7 @@ async function showApp(): Promise<void> {
     });
   }
   $('csv').addEventListener('change', (event) => void handleUpload(event));
+  $('lang').addEventListener('click', () => void toggleLanguage());
   bindIncomeForm();
   $('search').addEventListener('input', debounce(() => void runSearch(), 250));
   $('load-more').addEventListener('click', () => void loadInvoices(false));
@@ -76,17 +86,39 @@ async function showApp(): Promise<void> {
   await renderStaleness();
 }
 
+/**
+ * Switching language re-renders rather than reloading. Every view builds its
+ * markup from scratch on each render anyway, so redrawing is both cheaper than
+ * a reload and keeps the date range you had chosen.
+ */
+async function toggleLanguage(): Promise<void> {
+  setLocale(locale() === 'zh' ? 'en' : 'zh');
+  applyStaticStrings();
+  await renderDashboard();
+  await renderStaleness();
+  if (state.view !== 'dashboard') await renderView(state.view);
+}
+
 function switchView(view: string): void {
+  state.view = view;
   for (const button of document.querySelectorAll<HTMLButtonElement>('nav button')) {
     button.classList.toggle('active', button.dataset.view === view);
   }
   for (const section of document.querySelectorAll<HTMLElement>('.view')) {
     section.hidden = section.id !== `view-${view}`;
   }
-  if (view === 'invoices' && state.invoices.length === 0) void loadInvoices(true);
-  if (view === 'income') void renderIncome();
-  if (view === 'review') void renderReview();
-  if (view === 'stats') void renderStats();
+  // The invoice list is the one view worth keeping between visits — it pages,
+  // and re-fetching would throw away everything already scrolled past.
+  if (view === 'invoices' && state.invoices.length > 0) return;
+  void renderView(view);
+}
+
+function renderView(view: string): Promise<void> {
+  if (view === 'invoices') return loadInvoices(true);
+  if (view === 'income') return renderIncome();
+  if (view === 'review') return renderReview();
+  if (view === 'stats') return renderStats();
+  return renderDashboard();
 }
 
 /**
@@ -99,15 +131,15 @@ async function renderIncome(): Promise<void> {
 
   $('income-list').innerHTML =
     income.length === 0
-      ? '<p class="muted">No income recorded in this range.</p>'
-      : `<p class="muted">${money(total)} across ${income.length} entr${income.length === 1 ? 'y' : 'ies'}.</p>` +
+      ? `<p class="muted">${t('income.none')}</p>`
+      : `<p class="muted">${escape(t('income.summary', { n: income.length, total: money(total) }))}</p>` +
         income
           .map(
             (row) => `<div class="row">
               <span class="muted">${escape(row.date)}</span>
               <span class="grow">${escape(row.source)}${row.note ? ` · ${escape(row.note)}` : ''}</span>
               <span class="amount">${escape(money(row.amount))}</span>
-              <button class="del-income" data-id="${row.id}" title="Delete">✕</button>
+              <button class="del-income" data-id="${row.id}" title="${escape(t('action.delete'))}">✕</button>
             </div>`,
           )
           .join('');
@@ -128,7 +160,7 @@ function bindIncomeForm(): void {
     event.preventDefault();
     const amount = Number($<HTMLInputElement>('income-amount').value);
     if (!Number.isInteger(amount) || amount <= 0) {
-      flash('Amount must be a whole number of NT$.');
+      flash(t('income.badAmount'));
       return;
     }
     try {
@@ -141,11 +173,11 @@ function bindIncomeForm(): void {
       $<HTMLInputElement>('income-amount').value = '';
       $<HTMLInputElement>('income-source').value = '';
       $<HTMLInputElement>('income-note').value = '';
-      flash('Income added.');
+      flash(t('income.added'));
       await renderIncome();
       await renderDashboard();
     } catch (err) {
-      flash(err instanceof ApiCallError ? err.message : 'could not add income');
+      flash(err instanceof ApiCallError ? err.message : t('income.failed'));
     }
   });
 }
@@ -162,24 +194,32 @@ async function renderDashboard(): Promise<void> {
   const uncategorized = byCategory.breakdown.find((r) => r.key === 'uncategorized');
   const itemTotal = byCategory.totals.item_total;
 
-  const t = byCategory.totals;
+  const totals = byCategory.totals;
 
   $('totals').innerHTML = [
     // Already net of discounts and of items marked not-mine.
-    tile('Spent', money(t.invoice_total)),
-    t.income_total > 0 ? tile('Income', money(t.income_total)) : '',
+    tile(t('totals.spent'), money(totals.invoice_total)),
+    totals.income_total > 0 ? tile(t('totals.income'), money(totals.income_total)) : '',
     // Net only means something once there is income to net against.
-    t.income_total > 0
-      ? tile('Net', `${t.net_total < 0 ? '-' : ''}${money(Math.abs(t.net_total))}`)
-      : tile('Invoices', String(t.invoice_count)),
-    t.discount_total > 0 ? tile('Discounts', `-${money(t.discount_total)}`) : '',
-    tile('Uncategorized', itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal)),
+    totals.income_total > 0
+      ? tile(
+          t('totals.net'),
+          `${totals.net_total < 0 ? '-' : ''}${money(Math.abs(totals.net_total))}`,
+        )
+      : tile(t('totals.invoices'), String(totals.invoice_count)),
+    totals.discount_total > 0 ? tile(t('totals.discounts'), `-${money(totals.discount_total)}`) : '',
+    tile(
+      t('totals.uncategorized'),
+      itemTotal === 0 ? '—' : percent((uncategorized?.total ?? 0) / itemTotal),
+    ),
   ]
     .filter((x) => x !== '')
     .join('');
 
-  $('chart-category').innerHTML = bars(byCategory.breakdown, { color: (row) => categoryColor(row.key) });
-  $('chart-month').innerHTML = bars(byMonth.breakdown);
+  $('chart-category').innerHTML = bars(byCategory.breakdown, {
+    color: (row) => categoryColor(row.key),
+  });
+  $('chart-month').innerHTML = bars(byMonth.breakdown, { labelFormat: 'month' });
   $('chart-merchant').innerHTML = bars(byMerchant.breakdown.slice(0, 12));
 
   await renderBudget();
@@ -216,12 +256,10 @@ async function renderBudget(): Promise<void> {
 
 function budgetPrompt(budget: BudgetPace): string {
   return `<div class="budget-head">
-      <h2>No budget for ${escape(monthName(budget.month))}</h2>
-      <span class="muted">${escape(money(budget.spent))} spent so far</span>
+      <h2>${escape(t('budget.none', { month: monthName(budget.month) }))}</h2>
+      <span class="muted">${escape(t('budget.spentSoFar', { amount: money(budget.spent) }))}</span>
     </div>
-    <p class="hint">
-      Set it once — it carries forward to every later month until you change it.
-    </p>
+    <p class="hint">${escape(t('budget.setOnce'))}</p>
     ${budgetForm(null)}`;
 }
 
@@ -232,25 +270,34 @@ function budgetCard(budget: BudgetPace): string {
 
   const carried =
     budget.effective_from !== null && budget.effective_from !== budget.month
-      ? `<span class="tag">carried forward from ${escape(monthName(budget.effective_from))}</span>`
+      ? `<span class="tag">${escape(
+          t('budget.carried', { month: monthName(budget.effective_from) }),
+        )}</span>`
       : '';
 
   return `<div class="budget-head">
-      <h2>${escape(monthName(budget.month))} budget ${carried}</h2>
-      <span class="muted">${
-        budget.days_left === 0 ? 'month over' : `${budget.days_left} days left`
-      }</span>
+      <h2>${escape(t('budget.title', { month: monthName(budget.month) }))} ${carried}</h2>
+      <span class="muted">${escape(
+        budget.days_left === 0
+          ? t('budget.monthOver')
+          : t('budget.daysLeft', { n: budget.days_left }),
+      )}</span>
     </div>
     <div class="budget-figures">
       <strong>${escape(money(budget.spent))}</strong>
-      <span class="muted">of ${escape(money(amount))}</span>
+      <span class="muted">${escape(t('budget.of', { amount: money(amount) }))}</span>
       <span class="grow"></span>
-      <button id="budget-edit" class="linky">Edit</button>
+      <button id="budget-edit" class="linky">${escape(t('action.edit'))}</button>
     </div>
     <div class="budget-track ${escape(budget.status)}">
       <span class="budget-fill" style="width:${(Math.min(share, 1) * 100).toFixed(1)}%"></span>
       <span class="budget-today" style="left:${(monthShare * 100).toFixed(1)}%"
-            title="${budget.days_elapsed} of ${budget.days_in_month} days gone"></span>
+            title="${escape(
+              t('budget.daysGone', {
+                elapsed: budget.days_elapsed,
+                total: budget.days_in_month,
+              }),
+            )}"></span>
     </div>
     <p class="budget-lines ${escape(budget.status)}">${budgetSentence(budget)}</p>
     ${budgetForm(amount)}`;
@@ -259,40 +306,53 @@ function budgetCard(budget: BudgetPace): string {
 /**
  * One sentence, and which one depends on the only distinction that changes
  * what you would do: already over the budget, heading over it, or fine.
+ *
+ * These few phrases carry `<strong>` around the number that matters, so they
+ * are interpolated rather than escaped — the values going in are escaped here
+ * and the markup is ours.
  */
 function budgetSentence(budget: BudgetPace): string {
-  const over = budget.over_by ?? 0;
-
   if (budget.days_left === 0) {
     const remaining = budget.remaining ?? 0;
     return remaining < 0
-      ? `Finished ${escape(money(-remaining))} over.`
-      : `Finished ${escape(money(remaining))} under.`;
+      ? t('budget.finishedOver', { amount: escape(money(-remaining)) })
+      : t('budget.finishedUnder', { amount: escape(money(remaining)) });
   }
 
   if (budget.status === 'over') {
-    return `<strong>${escape(money(-(budget.remaining ?? 0)))} over budget</strong>
-      with ${budget.days_left} day${budget.days_left === 1 ? '' : 's'} still to go.`;
+    return t('budget.overBudget', {
+      amount: escape(money(-(budget.remaining ?? 0))),
+      n: budget.days_left,
+    });
   }
 
   const perDay =
     budget.remaining_per_day === null
       ? ''
-      : `<strong>${escape(money(budget.remaining_per_day))} a day</strong> left to spend,
-         against ${escape(money(budget.pace_per_day))} a day so far. `;
+      : `${t('budget.perDay', {
+          amount: escape(money(budget.remaining_per_day)),
+          pace: escape(money(budget.pace_per_day)),
+        })} `;
 
-  return budget.status === 'projected_over'
-    ? `${perDay}At this rate ${escape(money(budget.projected))} by month end —
-       ${escape(money(over))} over.`
-    : `${perDay}On track for ${escape(money(budget.projected))}.`;
+  return (
+    perDay +
+    (budget.status === 'projected_over'
+      ? t('budget.atThisRate', {
+          projected: escape(money(budget.projected)),
+          over: escape(money(budget.over_by ?? 0)),
+        })
+      : t('budget.onTrack', { projected: escape(money(budget.projected)) }))
+  );
 }
 
 /** Hidden until Edit is pressed once a figure exists; the only way in when it does not. */
 function budgetForm(amount: number | null): string {
   return `<form class="budget-form" id="budget-form"${amount === null ? '' : ' hidden'}>
       <input id="budget-amount" type="number" min="1" step="1" inputmode="numeric"
-             placeholder="Monthly budget NT$" value="${amount ?? ''}" required />
-      <button type="submit" class="upload">${amount === null ? 'Set budget' : 'Save'}</button>
+             placeholder="${escape(t('budget.placeholder'))}" value="${amount ?? ''}" required />
+      <button type="submit" class="upload">${escape(
+        amount === null ? t('action.setBudget') : t('action.save'),
+      )}</button>
     </form>`;
 }
 
@@ -307,29 +367,21 @@ function bindBudget(month: string): void {
     event.preventDefault();
     const amount = Number($<HTMLInputElement>('budget-amount').value);
     if (!Number.isInteger(amount) || amount <= 0) {
-      flash('Budget must be a whole number of NT$.');
+      flash(t('budget.badAmount'));
       return;
     }
     try {
       await api.setBudget(month, amount);
-      flash(`Budget for ${monthName(month)} set to ${money(amount)}.`);
+      flash(t('budget.set', { month: monthName(month), amount: money(amount) }));
       await renderBudget();
     } catch (err) {
-      flash(err instanceof ApiCallError ? err.message : 'could not set the budget');
+      flash(err instanceof ApiCallError ? err.message : t('budget.failed'));
     }
   });
 }
 
-function monthName(month: string): string {
-  return new Date(`${month}-01T00:00:00Z`).toLocaleString('en-US', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-
-function tile(label: string, value: string): string {
-  return `<div class="tile"><div class="label">${escape(label)}</div><div class="value">${escape(value)}</div></div>`;
+function tile(labelText: string, value: string): string {
+  return `<div class="tile"><div class="label">${escape(labelText)}</div><div class="value">${escape(value)}</div></div>`;
 }
 
 /**
@@ -350,16 +402,15 @@ function tile(label: string, value: string): string {
 interface BarOptions {
   color?: (row: SummaryRow) => string;
   format?: 'money' | 'count';
-  /** Singular noun for count rows, e.g. "item" → "9 items". */
-  unit?: string;
+  /** Month rows key on `YYYY-MM`, which is not what a person wants to read. */
+  labelFormat?: 'month';
 }
 
 function bars(rows: SummaryRow[], options: BarOptions = {}): string {
-  if (rows.length === 0) return '<p class="muted">Nothing in this range yet.</p>';
+  if (rows.length === 0) return `<p class="muted">${t('bars.empty')}</p>`;
 
   const values = rows.map((r) => Number(r.total) || 0);
   const total = values.reduce((sum, v) => sum + v, 0);
-  const unit = options.unit ?? 'item';
 
   return `<div class="bars">${rows
     .map((row, index) => {
@@ -368,15 +419,14 @@ function bars(rows: SummaryRow[], options: BarOptions = {}): string {
       // A non-zero row always shows something, or a 0.3% slice looks like 0.
       const width = value === 0 ? 0 : Math.max(1.5, share * 100);
       const fill = options.color ? options.color(row) : 'var(--accent)';
-      const label =
-        options.format === 'count'
-          ? `${value} ${unit}${value === 1 ? '' : 's'}`
-          : money(value);
+      const text =
+        options.format === 'count' ? t('bars.items', { n: value }) : money(value);
+      const name = options.labelFormat === 'month' ? monthName(row.key) : label(row);
       return `<div class="bar-row">
-          <span class="bar-label" title="${escape(row.label_en)}">${escape(row.label_en)}</span>
+          <span class="bar-label" title="${escape(name)}">${escape(name)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${width.toFixed(1)}%;background:${escape(fill)}"></span></span>
           <span class="bar-value">
-            <span class="bar-amount">${escape(label)}</span>
+            <span class="bar-amount">${escape(text)}</span>
             <span class="bar-share">${escape(percent(share))}</span>
           </span>
         </div>`;
@@ -385,13 +435,9 @@ function bars(rows: SummaryRow[], options: BarOptions = {}): string {
 }
 
 /** `category_source` values are internal; these are what a person reads. */
-const SOURCE_LABELS: Record<string, string> = {
-  override: 'Your correction',
-  merchant: 'Merchant rule',
-  cache: 'Cached answer',
-  llm: 'Model',
-  none: 'Not yet classified',
-};
+function sourceLabel(source: string | null): string {
+  return t(`source.${source ?? 'none'}`);
+}
 
 function categoryColor(key: string): string {
   return state.categories.find((c) => c.key === key)?.color ?? 'var(--accent)';
@@ -421,7 +467,7 @@ async function loadInvoices(reset: boolean): Promise<void> {
 
   $('invoice-list').innerHTML =
     state.invoices.length === 0
-      ? '<p class="muted">No invoices match.</p>'
+      ? `<p class="muted">${t('invoice.none')}</p>`
       : state.invoices
           .map(
             (inv) => `<div class="row" data-inv="${escape(inv.inv_num)}">
@@ -451,9 +497,14 @@ async function openInvoice(invNum: string): Promise<void> {
   $('detail-body').innerHTML = `
     <h2>${escape(detail.invoice.seller_name ?? invNum)}</h2>
     <p class="muted">${escape(detail.invoice.inv_date)} · ${escape(invNum)} · ${escape(money(detail.invoice.amount))}</p>
-    <p class="hint">Untick an item that is not yours — bought for someone else on a shared receipt. It stays on the invoice but drops out of your totals.</p>
+    <p class="hint">${escape(t('invoice.detailHint'))}</p>
     <table>
-      <thead><tr><th>Mine</th><th>Item</th><th>Category</th><th class="num">Amount</th></tr></thead>
+      <thead><tr>
+        <th>${escape(t('invoice.colMine'))}</th>
+        <th>${escape(t('invoice.colItem'))}</th>
+        <th>${escape(t('invoice.colCategory'))}</th>
+        <th class="num">${escape(t('invoice.colAmount'))}</th>
+      </tr></thead>
       <tbody>
         ${purchases
           .map(
@@ -461,10 +512,12 @@ async function openInvoice(invNum: string): Promise<void> {
               <td><input type="checkbox" class="mine" data-item="${item.id}" ${item.mine ? 'checked' : ''} /></td>
               <td>${escape(item.description)}</td>
               <td>${categorySelect(item.item_key, item.category)}
-                  <span class="tag">${escape(item.category_source ?? 'none')}</span></td>
+                  <span class="tag">${escape(sourceLabel(item.category_source))}</span></td>
               <td class="num">${escape(money(item.net_amount))}${
                 item.net_amount !== item.amount
-                  ? `<span class="muted"> was ${escape(money(item.amount))}</span>`
+                  ? `<span class="muted"> ${escape(
+                      t('invoice.was', { amount: money(item.amount) }),
+                    )}</span>`
                   : ''
               }</td>
             </tr>`,
@@ -475,7 +528,9 @@ async function openInvoice(invNum: string): Promise<void> {
     ${
       discount === 0
         ? ''
-        : `<p class="muted">Includes ${escape(money(discount))} of invoice discounts, spread across the lines above.</p>`
+        : `<p class="muted">${escape(
+            t('invoice.discountNote', { amount: money(discount) }),
+          )}</p>`
     }`;
 
   bindCategorySelects();
@@ -494,7 +549,7 @@ async function openInvoice(invNum: string): Promise<void> {
         // would undo a change the server had already accepted.
         box.checked = !box.checked;
         box.closest('tr')?.classList.toggle('excluded', !box.checked);
-        flash(err instanceof ApiCallError ? err.message : 'could not update the item');
+        flash(err instanceof ApiCallError ? err.message : t('invoice.updateFailed'));
         return;
       }
       await renderDashboard();
@@ -510,7 +565,7 @@ async function renderReview(): Promise<void> {
   const { items, low_confidence_threshold } = await api.reviewItems();
   $('review-list').innerHTML =
     items.length === 0
-      ? '<p class="muted">Nothing needs review. That is the system working.</p>'
+      ? `<p class="muted">${t('review.empty')}</p>`
       : items.map((item) => reviewRow(item, low_confidence_threshold)).join('');
   bindCategorySelects();
 }
@@ -518,7 +573,9 @@ async function renderReview(): Promise<void> {
 function reviewRow(item: ReviewItem, threshold: number): string {
   const flag =
     item.confidence !== null && item.confidence < threshold
-      ? `<span class="tag">low confidence ${item.confidence.toFixed(2)}</span>`
+      ? `<span class="tag">${escape(
+          t('review.lowConfidence', { score: item.confidence.toFixed(2) }),
+        )}</span>`
       : '';
   return `<div class="row">
       <span class="muted">${escape(item.inv_date)}</span>
@@ -538,7 +595,7 @@ function categorySelect(itemKey: string, current: string | null): string {
   const options = state.categories
     .map(
       (c) =>
-        `<option value="${escape(c.key)}"${c.key === current ? ' selected' : ''}>${escape(c.label_en)}</option>`,
+        `<option value="${escape(c.key)}"${c.key === current ? ' selected' : ''}>${escape(label(c))}</option>`,
     )
     .join('');
   return `<select class="cat" data-key="${escape(itemKey)}">
@@ -552,7 +609,7 @@ function bindCategorySelects(): void {
       const key = select.dataset.key ?? '';
       if (key === '' || select.value === '') return;
       const result = await api.categorize('item', key, select.value);
-      flash(`Recategorized ${result.items_updated} item${result.items_updated === 1 ? '' : 's'}`);
+      flash(t('categorize.done', { n: result.items_updated }));
       await renderDashboard();
     });
   }
@@ -566,33 +623,38 @@ async function renderStats(): Promise<void> {
 
   $('stats').innerHTML = `
     <div class="totals">
-      ${tile('Cache hit rate', stats.cache.hit_rate === null ? '—' : percent(stats.cache.hit_rate))}
-      ${tile('Items per model call', stats.batching.items_per_call?.toFixed(1) ?? '—')}
+      ${tile(t('stats.cacheHitRate'), stats.cache.hit_rate === null ? '—' : percent(stats.cache.hit_rate))}
+      ${tile(t('stats.itemsPerCall'), stats.batching.items_per_call?.toFixed(1) ?? '—')}
       ${tile(
-        'Uncategorized by value',
+        t('stats.uncatByValue'),
         coverage.uncategorized_share_by_value === null
           ? '—'
           : percent(coverage.uncategorized_share_by_value),
       )}
-      ${tile('Model spend', `US$${(stats.spend.estimated_usd_cents / 100).toFixed(2)}`)}
+      ${tile(t('stats.modelSpend'), `US$${(stats.spend.estimated_usd_cents / 100).toFixed(2)}`)}
     </div>
     <div class="panels">
       <div class="panel">
-        <h2>How items were classified</h2>
+        <h2>${escape(t('stats.howClassified'))}</h2>
         ${bars(
-          coverage.by_source.map((s) => ({
-            key: s.source,
-            label_en: SOURCE_LABELS[s.source] ?? s.source,
-            total: s.n,
-            item_count: s.n,
+          coverage.by_source.map((source) => ({
+            key: source.source,
+            label_en: sourceLabel(source.source),
+            total: source.n,
+            item_count: source.n,
           })),
           { format: 'count' },
         )}
       </div>
       <div class="panel">
-        <h2>Recent runs</h2>
+        <h2>${escape(t('stats.recentRuns'))}</h2>
         <table>
-          <thead><tr><th>#</th><th>Status</th><th class="num">New</th><th class="num">Items</th></tr></thead>
+          <thead><tr>
+            <th>#</th>
+            <th>${escape(t('stats.colStatus'))}</th>
+            <th class="num">${escape(t('stats.colNew'))}</th>
+            <th class="num">${escape(t('stats.colItems'))}</th>
+          </tr></thead>
           <tbody>${stats.sync.recent_runs
             .map(
               (run) => `<tr><td>${run.id}</td><td>${escape(run.status ?? '—')}</td>
@@ -600,14 +662,19 @@ async function renderStats(): Promise<void> {
             )
             .join('')}</tbody>
         </table>
-        <p class="muted">Synced through ${escape(stats.sync.synced_through ?? 'never')} · model ${escape(stats.model)}</p>
+        <p class="muted">${escape(
+          t('stats.syncedThrough', {
+            date: stats.sync.synced_through ?? t('stats.never'),
+            model: stats.model,
+          }),
+        )}</p>
       </div>
       <div class="panel">
-        <h2>Merchants worth a rule</h2>
+        <h2>${escape(t('stats.merchantsWorthRule'))}</h2>
         ${bars(
           stats.rule_candidates.map((m) => ({
             key: m.seller_ban ?? '',
-            label_en: m.seller_name ?? m.seller_ban ?? '(unknown)',
+            label_en: m.seller_name ?? m.seller_ban ?? t('stats.unknown'),
             total: m.n,
             item_count: m.n,
           })),
@@ -629,18 +696,20 @@ async function handleUpload(event: Event): Promise<void> {
   const file = input.files?.[0];
   if (!file) return;
 
-  const label = document.querySelector<HTMLLabelElement>('.upload');
-  const original = label?.textContent ?? 'Import CSV';
-  if (label) label.textContent = 'Reading…';
+  // By id, not by `.upload` — that class is on the income and budget buttons
+  // too, and a document-order query would eventually grab the wrong one.
+  const csvLabel = $<HTMLLabelElement>('csv-label');
+  const original = csvLabel.textContent ?? t('action.importCsv');
+  csvLabel.textContent = t('action.reading');
 
   try {
     const csv = await file.text();
     const preview = await api.importPreview(csv);
     openPreview(csv, preview);
   } catch (err) {
-    flash(err instanceof ApiCallError ? err.message : 'could not read the file');
+    flash(err instanceof ApiCallError ? err.message : t('preview.readFailed'));
   } finally {
-    if (label) label.textContent = original;
+    csvLabel.textContent = original;
     input.value = ''; // reset so re-selecting the same file fires `change` again
   }
 }
@@ -660,9 +729,10 @@ function openPreview(csv: string, preview: import('./api.js').ImportPreview): vo
   const total = preview.invoices.length;
   const fresh = preview.invoices.filter((i) => !i.already_imported).length;
   $('preview-summary').textContent =
-    `${total} invoice${total === 1 ? '' : 's'} in the file — ${fresh} new, ` +
-    `${total - fresh} already imported.` +
-    (preview.skipped_rows.length > 0 ? ` ${preview.skipped_rows.length} row(s) skipped.` : '');
+    t('preview.summary', { total, fresh, dup: total - fresh }) +
+    (preview.skipped_rows.length > 0
+      ? t('preview.skipped', { n: preview.skipped_rows.length })
+      : '');
 
   $('preview-body').innerHTML = preview.invoices
     .map((inv) => {
@@ -683,8 +753,8 @@ function openPreview(csv: string, preview: import('./api.js').ImportPreview): vo
             <span class="grow">${escape(inv.seller_name ?? inv.inv_num)}</span>
             <span class="muted">${escape(inv.inv_date)}</span>
             <span class="amount">${escape(money(inv.amount))}</span>
-            ${inv.already_imported ? '<span class="tag">already imported</span>' : ''}
-            ${inv.masked ? '<span class="tag">masked number</span>' : ''}
+            ${inv.already_imported ? `<span class="tag">${escape(t('preview.alreadyImported'))}</span>` : ''}
+            ${inv.masked ? `<span class="tag">${escape(t('preview.maskedNumber'))}</span>` : ''}
           </label>
           <table><tbody>${items}</tbody></table>
         </section>`;
@@ -719,7 +789,7 @@ async function commitPreview(csv: string): Promise<void> {
     .filter((n) => n !== '');
 
   if (include.length === 0) {
-    flash('Tick at least one invoice to import.');
+    flash(t('preview.pickOne'));
     return;
   }
 
@@ -732,25 +802,28 @@ async function commitPreview(csv: string): Promise<void> {
   const overrides = [...previewEdits].map(([item_key, category]) => ({ item_key, category }));
   const confirm = $<HTMLButtonElement>('preview-confirm');
   confirm.disabled = true;
-  confirm.textContent = 'Importing…';
+  confirm.textContent = t('action.importing');
 
   try {
     const result = await api.importCommit({ csv, include, exclude_items: excludeItems, overrides });
     const run = result.run;
     flash(
-      `Imported ${include.length} invoice${include.length === 1 ? '' : 's'} — ` +
-        `${run.headers_new} new, ${run.items_new} items` +
-        (excludeItems.length > 0 ? `, ${excludeItems.length} not counted` : '') +
-        (result.items_corrected ? `, ${result.items_corrected} corrected` : ''),
+      t('preview.imported', {
+        n: include.length,
+        headers: run.headers_new,
+        items: run.items_new,
+      }) +
+        (excludeItems.length > 0 ? t('preview.notCounted', { n: excludeItems.length }) : '') +
+        (result.items_corrected ? t('preview.corrected', { n: result.items_corrected }) : ''),
     );
     $<HTMLDialogElement>('preview').close();
     await renderDashboard();
     await renderStaleness();
   } catch (err) {
-    flash(err instanceof ApiCallError ? err.message : 'import failed');
+    flash(err instanceof ApiCallError ? err.message : t('preview.failed'));
   } finally {
     confirm.disabled = false;
-    confirm.textContent = 'Import selected';
+    confirm.textContent = t('action.importSelected');
   }
 }
 
@@ -769,10 +842,11 @@ async function renderStaleness(): Promise<void> {
     }
     banner.innerHTML =
       status.age_days === null
-        ? '<strong>No invoices imported yet.</strong> Export your carrier CSV and use Import CSV above.'
-        : `<strong>Data is ${status.age_days} days old.</strong> Covered through ${escape(
-            status.covered_through ?? 'nothing',
-          )} — export a fresh CSV and import it.`;
+        ? t('stale.never')
+        : t('stale.old', {
+            n: status.age_days,
+            date: escape(status.covered_through ?? '—'),
+          });
     banner.hidden = false;
   } catch {
     banner.hidden = true; // a status failure must not break the dashboard
