@@ -209,6 +209,19 @@ const zh: Record<string, Phrase> = {
   'account.webhookSaved': '通知網址已儲存。',
   'account.webhookFailed': '無法儲存通知網址',
 
+  'action.csvHelp': '如何取得 CSV？',
+  'guide.title': '從電子發票整合服務平台匯出 CSV',
+  'guide.intro': '大約 90 秒。一次查詢只能選同一個月，建議每週匯出兩次。',
+  'guide.step1': '打開財政部電子發票整合服務平台，按右上角的「登入」：',
+  'guide.step2': '選「消費者」→「手機條碼」，輸入手機號碼、驗證碼（密碼）和圖形驗證碼，按「登入」。',
+  'guide.step3':
+    '登入後會直接到「發票查詢及捐贈」。設定查詢發票日期起迄（起迄須在同一個月內），按「查詢」。',
+  'guide.step4': '在查詢結果下方，把「顯示筆數」改成 100 — 勾選不會跨頁保留，一頁要放得下全部發票。',
+  'guide.step5': '勾選表格「最右邊」那一欄的「全選」，再按「下載CSV檔」。',
+  'guide.warning':
+    '注意：最左邊那一欄的「全選」是捐贈用的，配上「捐贈」按鈕會把發票捐出去 — 無法復原，也不能再兌獎。只勾最右邊那一欄。',
+  'guide.then': '下載好之後，按上方的「匯入 CSV」選擇檔案；或到帳號選單產生匯入金鑰，讓資料夾自動匯入。',
+
   'source.override': '你的修正',
   'source.merchant': '商家規則',
   'source.cache': '快取結果',
@@ -367,6 +380,24 @@ const en: Record<string, Phrase> = {
     'When your data goes stale or an invoice wins a prize, a plain-text message is POSTed to this https URL (ntfy, Discord, Slack). Leave it empty for none.',
   'account.webhookSaved': 'Notification URL saved.',
   'account.webhookFailed': 'could not save the notification URL',
+
+  'action.csvHelp': 'How do I get the CSV?',
+  'guide.title': 'Export your CSV from the e-invoice platform',
+  'guide.intro':
+    'About ninety seconds. One query covers a single calendar month; exporting twice a week keeps the data current.',
+  'guide.step1': 'Open the Ministry of Finance e-invoice platform and press 登入 (Log in) at the top right:',
+  'guide.step2':
+    'Choose 消費者 (Consumer) → 手機條碼 (Mobile barcode), enter your phone number, verification code (password) and the captcha, and press 登入.',
+  'guide.step3':
+    'You land on 發票查詢及捐贈 (Invoice search and donation). Set the date range — start and end in the same month — and press 查詢 (Search).',
+  'guide.step4':
+    'Below the results, set 顯示筆數 (rows shown) to 100. Ticks do not carry across pages, so every invoice has to fit on one.',
+  'guide.step5':
+    'Tick 全選 (Select all) in the rightmost column of the table, then press 下載CSV檔 (Download CSV).',
+  'guide.warning':
+    'Careful: the 全選 in the leftmost column is for donating. With the 捐贈 (Donate) button it gives the invoices away — that cannot be undone and forfeits any prize. Only tick the rightmost column.',
+  'guide.then':
+    'Once it has downloaded, press Import CSV above and choose the file — or create an import token in the account menu and let the watch folder do it.',
 
   'source.override': 'Your correction',
   'source.merchant': 'Merchant rule',

@@ -47,6 +47,8 @@
           <input id="to" type="date" />
           <label class="upload" id="csv-label" for="csv" data-i18n="action.importCsv"></label>
           <input id="csv" type="file" accept=".csv,text/csv" hidden />
+          <!-- Opens the export guide: getting the file out of the portal is the one manual step. -->
+          <button id="csv-help" type="button" class="linky" data-i18n="action.csvHelp"></button>
           <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
           <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
           <!-- The username; opens the account dialog. -->
@@ -120,6 +122,48 @@
         <div class="preview-actions">
           <button id="preview-cancel" data-i18n="action.cancel"></button>
           <button id="preview-confirm" class="upload" data-i18n="action.importSelected"></button>
+        </div>
+      </dialog>
+
+      <!--
+        How to export the CSV from the carrier portal. The screenshots in
+        /guide/ had every personal detail replaced with placeholders in the page
+        before capture — keep it that way if they are ever retaken.
+      -->
+      <dialog id="guide">
+        <div class="preview-head">
+          <h2 data-i18n="guide.title"></h2>
+          <p class="muted" data-i18n="guide.intro"></p>
+        </div>
+        <ol class="guide-steps">
+          <li>
+            <p>
+              <span data-i18n="guide.step1"></span>
+              <a href="https://www.einvoice.nat.gov.tw/" target="_blank" rel="noopener noreferrer">www.einvoice.nat.gov.tw</a>
+            </p>
+            <img src="/guide/01-login-link.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step2"></p>
+            <img src="/guide/02-login-form.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step3"></p>
+            <img src="/guide/03-query-form.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step4"></p>
+            <img src="/guide/04-page-size.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step5"></p>
+            <p class="guide-warning" data-i18n="guide.warning"></p>
+            <img src="/guide/05-download.jpg" alt="" loading="lazy" />
+          </li>
+        </ol>
+        <p class="hint" data-i18n="guide.then"></p>
+        <div class="preview-actions">
+          <button id="guide-close" type="button" data-i18n="action.close"></button>
         </div>
       </dialog>
 

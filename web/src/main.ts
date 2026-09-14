@@ -118,6 +118,7 @@ async function showApp(): Promise<void> {
   $('csv').addEventListener('change', (event) => void handleUpload(event));
   $('lang').addEventListener('click', () => void toggleLanguage());
   bindAccount();
+  bindGuide();
   bindIncomeForm();
   $('search').addEventListener('input', debounce(() => void runSearch(), 250));
   $('load-more').addEventListener('click', () => void loadInvoices(false));
@@ -139,6 +140,18 @@ async function toggleLanguage(): Promise<void> {
   await renderStaleness();
   if (state.view !== 'dashboard') await renderView(state.view);
   if ($<HTMLDialogElement>('account-dialog').open) await renderAccount();
+}
+
+/**
+ * The export guide. Getting the file out of the carrier portal is the one step
+ * this system cannot do for you — the login sits behind bot management — so it
+ * is written down beside the button that needs the file, with pictures, and
+ * says plainly which checkbox column gives your invoices away.
+ */
+function bindGuide(): void {
+  const dialog = $<HTMLDialogElement>('guide');
+  $('csv-help').addEventListener('click', () => dialog.showModal());
+  $('guide-close').addEventListener('click', () => dialog.close());
 }
 
 function switchView(view: string): void {

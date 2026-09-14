@@ -654,6 +654,43 @@ tr.excluded td:not(:first-child) {
   flex-wrap: wrap;
 }
 
+/* ------------------------------------------------------------------ guide */
+
+#guide {
+  max-width: min(760px, 94vw);
+}
+
+/* The steps scroll; the heading and Close stay put. */
+.guide-steps {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 1.2rem;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.guide-steps p {
+  margin: 0 0 0.5rem;
+}
+
+.guide-steps img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* The donation column is the one mistake here that cannot be undone. */
+.guide-warning {
+  padding: 0.55rem 0.8rem;
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------- account */
 
 /* Sign-in and sign-up share the form; the switch between them is a link. */
