@@ -15,7 +15,8 @@ on and can answer "where did it go this month" with item-level accuracy.
 
 ## The user
 
-One. Me. See Non-goals.
+Originally one — me. Now anyone who signs up, each seeing only their own
+invoices; see *Reversed*.
 
 ## v1 scope
 
@@ -47,10 +48,6 @@ fetched and matched against stored invoices; a hit produces a notification.
 
 These are not "later" — they are decisions to not build:
 
-- **Multi-user.** The carrier verification code is a credential tied to a
-  national-ID-linked account. Accepting other people's is a security and
-  privacy problem substantially larger than the rest of this project combined.
-  Single-user is the honest scope.
 - **Bank / credit card import.** No usable open-banking API; would mean
   screen-scraping or CSV babysitting, and it dilutes the one genuinely
   interesting data source.
@@ -79,6 +76,19 @@ These are not "later" — they are decisions to not build:
   through the month you are. `budget/pace.ts` is pure, the table stores change
   points rather than one current value so a past month keeps the budget it was
   actually lived under, and nothing else from that bullet came with it.
+
+- **Multi-user** (2026-09-14). Ruled out because the carrier verification
+  code is a credential tied to a national-ID-linked account, and holding
+  other people's was a bigger security problem than the rest of the project.
+  The move to CSV import removed that premise: nothing in the Worker holds a
+  carrier credential for anyone, and an account holds only files its owner
+  chose to upload. What was left was isolation, which is enforced where the
+  data is read — every query on personal data takes an account id — and
+  tested by importing one export into two accounts.
+
+  Sign-up is open. Categories, rules and the classifier cache are shared,
+  because they describe products rather than people; invoices, corrections,
+  income and budgets are not.
 
 ## Success criteria
 

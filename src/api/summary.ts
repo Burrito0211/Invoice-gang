@@ -20,7 +20,12 @@ import type { IsoDate } from '../types.js';
 
 type Grouping = 'category' | 'merchant' | 'month';
 
-export async function handleSummary(db: D1Database, url: URL, today: IsoDate): Promise<Response> {
+export async function handleSummary(
+  db: D1Database,
+  accountId: number,
+  url: URL,
+  today: IsoDate,
+): Promise<Response> {
   const { from, to } = dateRange(url, today);
   if (from > to) throw badRequest('from must not be after to');
 
@@ -30,9 +35,9 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
   }
 
   const [totals, breakdown, income] = await Promise.all([
-    totalsForRange(db, from, to),
-    buildBreakdown(db, group, from, to),
-    incomeTotalForRange(db, from, to),
+    totalsForRange(db, accountId, from, to),
+    buildBreakdown(db, accountId, group, from, to),
+    incomeTotalForRange(db, accountId, from, to),
   ]);
 
   const spent = totals?.invoice_total ?? 0;
@@ -57,15 +62,18 @@ export async function handleSummary(db: D1Database, url: URL, today: IsoDate): P
 
 async function buildBreakdown(
   db: D1Database,
+  accountId: number,
   group: Grouping,
   from: IsoDate,
   to: IsoDate,
 ): Promise<Record<string, unknown>[]> {
-  if (group === 'merchant') return (await summaryByMerchant(db, from, to)) as Record<string, unknown>[];
+  if (group === 'merchant') {
+    return (await summaryByMerchant(db, accountId, from, to)) as Record<string, unknown>[];
+  }
 
   if (group === 'month') {
     if (isWholeMonths(from, to)) {
-      const rows = await monthlyByCategory(db, from.slice(0, 7), to.slice(0, 7));
+      const rows = await monthlyByCategory(db, accountId, from.slice(0, 7), to.slice(0, 7));
       const byMonth = new Map<string, { key: string; label_en: string; total: number; item_count: number }>();
       for (const row of rows) {
         const entry = byMonth.get(row.month) ?? {
@@ -80,11 +88,11 @@ async function buildBreakdown(
       }
       return [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key));
     }
-    return (await summaryByMonth(db, from, to)) as Record<string, unknown>[];
+    return (await summaryByMonth(db, accountId, from, to)) as Record<string, unknown>[];
   }
 
   if (isWholeMonths(from, to)) {
-    const rows = await monthlyByCategory(db, from.slice(0, 7), to.slice(0, 7));
+    const rows = await monthlyByCategory(db, accountId, from.slice(0, 7), to.slice(0, 7));
     const byCategory = new Map<string, { key: string; label_en: string; label_zh: string; total: number; item_count: number }>();
     for (const row of rows) {
       const key = row.category_key ?? 'uncategorized';
@@ -102,7 +110,7 @@ async function buildBreakdown(
     return [...byCategory.values()].sort((a, b) => b.total - a.total);
   }
 
-  return (await summaryByCategory(db, from, to)) as Record<string, unknown>[];
+  return (await summaryByCategory(db, accountId, from, to)) as Record<string, unknown>[];
 }
 
 /** The view is monthly; only a whole-month range can be answered from it. */

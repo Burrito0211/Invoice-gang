@@ -1,11 +1,16 @@
 /**
- * Prints an `OWNER_PASSWORD_HASH` for `wrangler secret put`.
+ * Prints a password hash in the format `account.password_hash` holds.
  *
- *   node scripts/hash-password.mjs 'my password'
+ *   node scripts/hash-password.mjs 'new password'
+ *
+ * There is no password-reset flow, so this is the reset: hash the new
+ * password, put `UPDATE account SET password_hash = '<hash>' WHERE username =
+ * '<name>';` in a .sql file, and run it with `wrangler d1 execute --file`. A
+ * file rather than `--command`, because a hash is full of `$` and a shell will
+ * try to expand them.
  *
  * PBKDF2-SHA256 via WebCrypto, the same primitive `src/api/auth.ts` verifies
- * with — Workers ship WebCrypto and neither argon2 nor scrypt, and pulling a
- * WASM hasher in to protect one self-chosen password is the worse trade.
+ * with — Workers ship WebCrypto and neither argon2 nor scrypt.
  */
 import { webcrypto as crypto } from 'node:crypto';
 

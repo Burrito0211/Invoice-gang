@@ -21,16 +21,6 @@ export class ConfigError extends Error {
 /** Per-call batch size. Bigger is cheaper per item; 50 is the verified default. */
 const DEFAULT_LLM_BATCH_SIZE = 50;
 
-/**
- * The carrier row's key. One helper because a mismatch here is invisible:
- * `ensureCarrier` would create a row under one name while every lookup asked
- * for another, and imports would fail with "no carrier row" forever.
- */
-export function carrierKey(env: Env): string {
-  const configured = env.EINVOICE_CARD_NO?.trim();
-  return configured && configured !== '' ? configured : 'default';
-}
-
 export function loadConfig(env: Env): Config {
   return {
     llmBatchSize: int(env.LLM_BATCH_SIZE, DEFAULT_LLM_BATCH_SIZE, 'LLM_BATCH_SIZE'),
@@ -40,9 +30,12 @@ export function loadConfig(env: Env): Config {
 /**
  * Fail before anything is written rather than after, so a missing secret is
  * one clear error instead of a confusing downstream failure.
+ *
+ * Only the session secret: passwords live in the `account` table now, and
+ * `OWNER_PASSWORD_HASH` is an optional leftover read by one legacy sign-in.
  */
 export function requireAuthSecrets(env: Env): void {
-  requireAll(env, ['SESSION_SECRET', 'OWNER_PASSWORD_HASH']);
+  requireAll(env, ['SESSION_SECRET']);
 }
 
 export function requireLlmSecrets(env: Env): void {

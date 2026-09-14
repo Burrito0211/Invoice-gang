@@ -653,3 +653,79 @@ tr.excluded td:not(:first-child) {
 .topbar .range {
   flex-wrap: wrap;
 }
+
+/* ---------------------------------------------------------------- account */
+
+/* Sign-in and sign-up share the form; the switch between them is a link. */
+.login form .linky {
+  justify-self: center;
+}
+
+.login .hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* The username in the header, opening the account dialog. */
+#account {
+  align-self: center;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.account-head p {
+  margin: 0.1rem 0 0;
+}
+
+.account-section {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+}
+
+.account-section h3 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+
+.account-section .hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.account-actions input {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+/*
+ * The one moment an import token is visible. Selected whole in one click, and
+ * allowed to break anywhere, because 64 hex characters do not fit a phone.
+ */
+.token {
+  display: block;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  word-break: break-all;
+  user-select: all;
+}

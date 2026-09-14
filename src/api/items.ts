@@ -11,11 +11,11 @@ import { boolParam, intParam, json } from './respond.js';
 /** Below this the model was guessing; docs/CATEGORIZATION.md calls it ~0.6. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
-export async function handleItems(db: D1Database, url: URL): Promise<Response> {
+export async function handleItems(db: D1Database, accountId: number, url: URL): Promise<Response> {
   const uncategorized = boolParam(url, 'uncategorized');
   const lowConfidence = boolParam(url, 'low_confidence');
 
-  const rows = await listReviewItems(db, {
+  const rows = await listReviewItems(db, accountId, {
     // Neither filter asked for means "show me the queue", which is both.
     uncategorized: uncategorized || !lowConfidence,
     lowConfidence: lowConfidence || !uncategorized,

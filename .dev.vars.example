@@ -1,8 +1,7 @@
 # Copy to .dev.vars for `wrangler dev`. Never commit the real file.
 # In production these are `wrangler secret put`, not vars.
-EINVOICE_APP_ID=
-EINVOICE_CARD_NO=
-EINVOICE_CARD_ENCRYPT=
-ANTHROPIC_API_KEY=
 SESSION_SECRET=
+# Optional. Without it, items no rule recognises stay uncategorized.
+ANTHROPIC_API_KEY=
+# Optional, legacy: only for the first sign-in as `owner` after migration 005.
 OWNER_PASSWORD_HASH=

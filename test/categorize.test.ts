@@ -14,7 +14,7 @@ import {
   upsertCacheStatement,
   upsertOverride,
 } from '../src/db/queries.js';
-import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
+import { createTestDb, createTestKv, seedAccount } from './helpers/d1.js';
 
 let db: ReturnType<typeof createTestDb>;
 let kv: ReturnType<typeof createTestKv>;
@@ -22,7 +22,7 @@ let kv: ReturnType<typeof createTestKv>;
 beforeEach(async () => {
   db = createTestDb();
   kv = createTestKv();
-  await seedCarrier(db, 1_750_000_000);
+  await seedAccount(db, 1_750_000_000);
 });
 
 afterEach(() => db.close());
@@ -44,16 +44,16 @@ async function insertInvoiceWithItem(
 ): Promise<number> {
   await db
     .prepare(
-      `INSERT INTO invoice (inv_num, carrier_id, inv_date, seller_ban, seller_name, amount,
-                            first_seen_at, updated_at)
-       VALUES (?, 1, '2026-09-01', ?, ?, ?, 1, 1)`,
+      `INSERT INTO invoice (account_id, inv_num, carrier_id, inv_date, seller_ban, seller_name,
+                            amount, first_seen_at, updated_at)
+       VALUES (1, ?, 1, '2026-09-01', ?, ?, ?, 1, 1)`,
     )
     .bind(invNum, sellerBan, sellerName, amount)
     .run();
   const row = await db
     .prepare(
-      `INSERT INTO invoice_item (inv_num, row_num, description, item_key, amount)
-       VALUES (?, 1, ?, ?, ?) RETURNING id`,
+      `INSERT INTO invoice_item (account_id, inv_num, row_num, description, item_key, amount)
+       VALUES (1, ?, 1, ?, ?, ?) RETURNING id`,
     )
     .bind(invNum, description, itemKey, amount)
     .first<{ id: number }>();
@@ -150,7 +150,7 @@ describe('the pipeline', () => {
           sellerName: '統一超商',
         },
       ],
-      { db, kv, now: () => 1_750_000_100, llm: null },
+      { db, kv, now: () => 1_750_000_100, llm: null, accountId: 1 },
     );
 
     expect(totals.resolvedFree).toBe(1);
@@ -187,7 +187,7 @@ describe('the pipeline', () => {
           sellerName: '麵店',
         },
       ],
-      { db, kv, now: () => 2, llm: null },
+      { db, kv, now: () => 2, llm: null, accountId: 1 },
     );
 
     expect(totals.cacheHits).toBe(1);
@@ -212,7 +212,7 @@ describe('the pipeline', () => {
           sellerName: '新店',
         },
       ],
-      { db, kv, now: () => 3, llm: null },
+      { db, kv, now: () => 3, llm: null, accountId: 1 },
     );
 
     expect(totals.uncategorized).toBe(1);
@@ -245,8 +245,8 @@ describe('the correction loop', () => {
         .run();
     }
 
-    await upsertOverride(db, 'item', 'usb 充電線', electronics, 10);
-    const updated = await applyOverrideToItems(db, 'usb 充電線', electronics, 10);
+    await upsertOverride(db, 1, 'item', 'usb 充電線', electronics, 10);
+    const updated = await applyOverrideToItems(db, 1, 'usb 充電線', electronics, 10);
 
     expect(updated).toBe(3);
     const rows = await db

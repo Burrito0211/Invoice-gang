@@ -12,11 +12,15 @@ import type { Unix } from '../types.js';
 
 export async function handleImportStatus(
   db: D1Database,
+  accountId: number,
   carrierId: number,
   now: Unix,
   staleAfterDays: number,
 ): Promise<Response> {
-  const [runs, state] = await Promise.all([listSyncRuns(db, 20), getSyncState(db, carrierId)]);
+  const [runs, state] = await Promise.all([
+    listSyncRuns(db, accountId, 20),
+    getSyncState(db, carrierId),
+  ]);
 
   // Must be the actual current time, not midnight of today's date: an import
   // that ran an hour ago is younger than midnight and would age negatively.

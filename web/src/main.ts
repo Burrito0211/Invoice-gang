@@ -16,6 +16,8 @@ import { api, ApiCallError } from './api.js';
 import { applyStaticStrings, label, locale, monthName, setLocale, t } from './i18n.js';
 import type { BudgetPace, Category, InvoiceSummary, ReviewItem, SummaryRow } from './api.js';
 
+type AuthMode = 'signIn' | 'register';
+
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const state = {
@@ -27,6 +29,8 @@ const state = {
   search: '',
   /** Tracked so a language change can re-render whatever is on screen. */
   view: 'dashboard',
+  username: '',
+  authMode: 'signIn' as AuthMode,
 };
 
 // --------------------------------------------------------------------- boot
@@ -36,30 +40,66 @@ void start();
 async function start(): Promise<void> {
   setLocale(locale()); // stamps <html lang> from the stored or detected choice
   applyStaticStrings();
-  const { authenticated } = await api.session();
-  if (!authenticated) return showLogin();
+  const session = await api.session();
+  if (!session.authenticated) return showLogin();
+  state.username = session.username ?? '';
   await showApp();
 }
 
+/**
+ * Sign-in and sign-up share one form — the same two fields, a different
+ * button and endpoint. Sign-up is open, so this is also the front door for
+ * someone who has never been here, and it says how to get in.
+ */
 function showLogin(): void {
   $('login').hidden = false;
+  renderLoginMode();
+
+  $('login-switch').addEventListener('click', () => {
+    state.authMode = state.authMode === 'signIn' ? 'register' : 'signIn';
+    renderLoginMode();
+  });
+
   $<HTMLFormElement>('login-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const error = $('login-error');
     error.hidden = true;
+    const username = $<HTMLInputElement>('username').value.trim();
+    const password = $<HTMLInputElement>('password').value;
+    const registering = state.authMode === 'register';
     try {
-      await api.login($<HTMLInputElement>('password').value);
+      const result = registering
+        ? await api.register(username, password)
+        : await api.login(username, password);
+      state.username = result.username;
       $('login').hidden = true;
       await showApp();
     } catch (err) {
-      error.textContent = err instanceof ApiCallError ? err.message : t('login.failed');
+      error.textContent =
+        err instanceof ApiCallError
+          ? err.message
+          : registering
+            ? t('login.registerFailed')
+            : t('login.failed');
       error.hidden = false;
     }
   });
 }
 
+function renderLoginMode(): void {
+  const registering = state.authMode === 'register';
+  $('login-submit').textContent = registering ? t('action.createAccount') : t('action.signIn');
+  $('login-switch').textContent = registering ? t('login.toSignIn') : t('login.toRegister');
+  $('login-hint').hidden = !registering;
+  // Lets a password manager offer to generate one, rather than fill an old one.
+  $<HTMLInputElement>('password').autocomplete = registering ? 'new-password' : 'current-password';
+  $('login-error').hidden = true;
+}
+
 async function showApp(): Promise<void> {
   $('app').hidden = false;
+  // Never an empty, invisible button: without a name the dialog would be unreachable.
+  $('account').textContent = state.username || t('nav.account');
   $<HTMLInputElement>('from').value = state.from;
   $<HTMLInputElement>('to').value = state.to;
 
@@ -77,6 +117,7 @@ async function showApp(): Promise<void> {
   }
   $('csv').addEventListener('change', (event) => void handleUpload(event));
   $('lang').addEventListener('click', () => void toggleLanguage());
+  bindAccount();
   bindIncomeForm();
   $('search').addEventListener('input', debounce(() => void runSearch(), 250));
   $('load-more').addEventListener('click', () => void loadInvoices(false));
@@ -97,6 +138,7 @@ async function toggleLanguage(): Promise<void> {
   await renderDashboard();
   await renderStaleness();
   if (state.view !== 'dashboard') await renderView(state.view);
+  if ($<HTMLDialogElement>('account-dialog').open) await renderAccount();
 }
 
 function switchView(view: string): void {
@@ -853,7 +895,109 @@ async function renderStaleness(): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------ account
+
+/**
+ * The account dialog: who is signed in, the watch-folder token, the
+ * notification webhook, and signing out.
+ *
+ * The import token is shown in exactly one render — the one straight after it
+ * is created. The server keeps only a hash and could not show it again if
+ * asked, so closing the dialog or switching language hides it for good.
+ */
+function bindAccount(): void {
+  const dialog = $<HTMLDialogElement>('account-dialog');
+  $('account').addEventListener('click', () => void openAccount());
+  $('account-close').addEventListener('click', () => dialog.close());
+  $('sign-out').addEventListener('click', () => void signOut());
+  $('sign-out-top').addEventListener('click', () => void signOut());
+  $('token-create').addEventListener('click', () => void createToken());
+  $('token-revoke').addEventListener('click', () => void revokeToken());
+  $<HTMLFormElement>('webhook-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    void saveWebhook();
+  });
+}
+
+async function openAccount(): Promise<void> {
+  await renderAccount();
+  $<HTMLDialogElement>('account-dialog').showModal();
+}
+
+async function renderAccount(freshToken?: string): Promise<void> {
+  const account = await api.account();
+  $('account-name').textContent = account.username;
+  $('account-since').textContent = t('account.since', { date: dateOf(account.created_at) });
+
+  const token = account.import_token;
+  $('token-status').textContent =
+    token === null
+      ? t('account.tokenNone')
+      : t('account.tokenSet', {
+          date: dateOf(token.created_at),
+          used: token.last_used_at === null ? t('account.never') : dateOf(token.last_used_at),
+        });
+
+  const value = $('token-value');
+  value.textContent = freshToken ?? '';
+  value.hidden = freshToken === undefined;
+  $('token-create').textContent =
+    token === null ? t('action.createToken') : t('action.replaceToken');
+  $('token-revoke').hidden = token === null;
+
+  $<HTMLInputElement>('webhook-url').value = account.notify_webhook ?? '';
+}
+
+async function createToken(): Promise<void> {
+  try {
+    const { token } = await api.createImportToken();
+    await renderAccount(token);
+    flash(t('account.tokenCopyNow'));
+  } catch (err) {
+    flash(err instanceof ApiCallError ? err.message : t('account.tokenFailed'));
+  }
+}
+
+async function revokeToken(): Promise<void> {
+  try {
+    await api.revokeImportToken();
+    await renderAccount();
+    flash(t('account.tokenRevoked'));
+  } catch (err) {
+    flash(err instanceof ApiCallError ? err.message : t('account.tokenFailed'));
+  }
+}
+
+async function saveWebhook(): Promise<void> {
+  const value = $<HTMLInputElement>('webhook-url').value.trim();
+  try {
+    await api.updateAccount({ notify_webhook: value === '' ? null : value });
+    flash(t('account.webhookSaved'));
+  } catch (err) {
+    flash(err instanceof ApiCallError ? err.message : t('account.webhookFailed'));
+  }
+}
+
+/**
+ * A reload rather than tearing the page down by hand: the dashboard holds the
+ * last account's invoices in `state` and in the DOM, and a reload is the one
+ * way to be sure none of it is still on screen for whoever signs in next.
+ */
+async function signOut(): Promise<void> {
+  try {
+    await api.logout();
+  } finally {
+    // Reload even if the request failed, so a sign-out is never a dead button.
+    location.reload();
+  }
+}
+
 // ------------------------------------------------------------------ helpers
+
+/** Unix seconds → `YYYY-MM-DD`, the one date format this app shows. */
+function dateOf(unix: number): string {
+  return new Date(unix * 1000).toISOString().slice(0, 10);
+}
 
 /** NT$ has no minor unit in practice; the integer from the server is the value. */
 function money(value: number): string {

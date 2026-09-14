@@ -5,6 +5,9 @@
  * from an invoice — deliberately kept in its own table and its own handler,
  * beside the invoice pipeline rather than inside it. Money is an INTEGER of
  * New Taiwan dollars here as everywhere.
+ *
+ * Both are addressed by row id, and an id from another account is answered
+ * exactly like an id that does not exist: 404, and nothing changed.
  */
 import {
   deleteIncome,
@@ -18,13 +21,19 @@ import type { IsoDate, Unix } from '../types.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export async function handleListIncome(db: D1Database, url: URL, today: IsoDate): Promise<Response> {
+export async function handleListIncome(
+  db: D1Database,
+  accountId: number,
+  url: URL,
+  today: IsoDate,
+): Promise<Response> {
   const { from, to } = dateRange(url, today);
-  return json({ income: await listIncome(db, from, to) });
+  return json({ income: await listIncome(db, accountId, from, to) });
 }
 
 export async function handleCreateIncome(
   db: D1Database,
+  accountId: number,
   request: Request,
   now: Unix,
 ): Promise<Response> {
@@ -49,14 +58,18 @@ export async function handleCreateIncome(
 
   const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
 
-  const id = await insertIncome(db, { date, amount, source, note, now });
+  const id = await insertIncome(db, accountId, { date, amount, source, note, now });
   return json({ id, date, amount, source, note }, 201);
 }
 
-export async function handleDeleteIncome(db: D1Database, idText: string): Promise<Response> {
+export async function handleDeleteIncome(
+  db: D1Database,
+  accountId: number,
+  idText: string,
+): Promise<Response> {
   const id = Number(idText);
   if (!Number.isInteger(id)) throw badRequest('id must be an integer');
-  const removed = await deleteIncome(db, id);
+  const removed = await deleteIncome(db, accountId, id);
   if (!removed) throw new ApiError(404, 'not_found', `no income row ${id}`);
   return json({ ok: true });
 }
@@ -68,6 +81,7 @@ export async function handleDeleteIncome(db: D1Database, idText: string): Promis
  */
 export async function handleItemExclude(
   db: D1Database,
+  accountId: number,
   request: Request,
 ): Promise<Response> {
   const body = (await readBody(request)) as { id?: unknown; mine?: unknown };
@@ -75,7 +89,7 @@ export async function handleItemExclude(
   if (!Number.isInteger(id)) throw badRequest('id must be an integer');
   if (typeof body.mine !== 'boolean') throw badRequest('mine must be true or false');
 
-  const changed = await setItemExcluded(db, id, !body.mine);
+  const changed = await setItemExcluded(db, accountId, id, !body.mine);
   if (!changed) throw new ApiError(404, 'not_found', `no item ${id}`);
   return json({ id, mine: body.mine });
 }

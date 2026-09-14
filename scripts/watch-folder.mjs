@@ -18,7 +18,7 @@
  * Configure with a .env-style file or environment variables:
  *
  *   INVOICE_GANG_URL=https://invoice-gang.<subdomain>.workers.dev
- *   INVOICE_GANG_TOKEN=<the IMPORT_TOKEN secret>
+ *   INVOICE_GANG_TOKEN=<your import token, from the dashboard's account menu>
  *   INVOICE_GANG_WATCH=C:\Users\you\Downloads      (optional)
  *   INVOICE_GANG_ARCHIVE=C:\Users\you\Downloads\invoice-gang-archive
  *
@@ -58,7 +58,7 @@ function fail(message) {
 }
 
 if (!CONFIG.url) fail('set INVOICE_GANG_URL to your deployed Worker URL');
-if (!CONFIG.token) fail('set INVOICE_GANG_TOKEN to the IMPORT_TOKEN secret you configured');
+if (!CONFIG.token) fail('set INVOICE_GANG_TOKEN to an import token from the account menu in the dashboard');
 
 async function looksLikeExport(path) {
   // Cheap structural check before uploading. A file that is not a carrier

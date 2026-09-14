@@ -36,6 +36,14 @@ These exist because breaking them is what makes this project hard to work on
 later:
 
 - **All SQL lives in `src/db/queries.ts`.** No query strings anywhere else.
+- **Every query on personal data takes an account id.** Sign-up is open.
+  Invoices, items, overrides, income, budgets and import runs belong to one
+  account, so every function in `queries.ts` that touches them takes
+  `accountId` as a required parameter and filters on it. A query that forgets
+  it shows one stranger another's purchases. Categories, rules, winning
+  numbers and the classifier cache are shared and take no account.
+  `test/accounts.test.ts` imports one export into two accounts to catch a
+  missing filter.
 - **`import/csv.ts` is pure** — no HTTP, no database, no clock. It turns CSV
   text into domain types and nothing else, which is what makes the importer
   fully testable and is the same boundary the old MOF client had.
@@ -55,8 +63,9 @@ Any change to `src/import/` must keep both properties in `docs/IMPORT.md`
 holding, and the tests asserting them must still pass:
 
 - **Idempotent** — exports overlap by design, so re-importing the same file
-  must change nothing. Enforced structurally by `invoice.inv_num` and
-  `UNIQUE (inv_num, row_num)`, never by reading before writing.
+  must change nothing. Enforced structurally by
+  `PRIMARY KEY (account_id, inv_num)` and `UNIQUE (account_id, inv_num, row_num)`,
+  never by reading before writing.
 - **Monotone** — an import never deletes or blanks an existing invoice.
 
 Three rules about the file itself are load-bearing and easy to undo by

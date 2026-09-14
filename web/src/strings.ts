@@ -76,6 +76,7 @@ const zh: Record<string, Phrase> = {
   'nav.income': '收入',
   'nav.review': '待分類',
   'nav.stats': '統計',
+  'nav.account': '帳號',
 
   'action.importCsv': '匯入 CSV',
   'action.reading': '讀取中…',
@@ -90,9 +91,19 @@ const zh: Record<string, Phrase> = {
   'action.setBudget': '設定預算',
   'action.loadMore': '載入更多',
   'action.delete': '刪除',
+  'action.createAccount': '建立帳號',
+  'action.signOut': '登出',
+  'action.createToken': '產生匯入金鑰',
+  'action.replaceToken': '重新產生金鑰',
+  'action.revoke': '撤銷',
 
   'login.password': '密碼',
   'login.failed': '登入失敗',
+  'login.username': '帳號名稱',
+  'login.registerFailed': '無法建立帳號',
+  'login.toRegister': '還沒有帳號？建立一個',
+  'login.toSignIn': '已經有帳號了？登入',
+  'login.registerHint': '帳號名稱 3–32 個字元，限英文小寫、數字與 _ . -；密碼至少 8 個字元。',
 
   'search.placeholder': '搜尋商家與品名…',
 
@@ -182,6 +193,22 @@ const zh: Record<string, Phrase> = {
   'stats.never': '尚未匯入',
   'stats.unknown': '（不明）',
 
+  'account.since': '{date} 加入',
+  'account.tokenTitle': '資料夾自動匯入',
+  'account.tokenHint':
+    'scripts/watch-folder.mjs 用這把金鑰把 CSV 上傳到你的帳號。金鑰只會顯示一次；重新產生後，舊的立即失效。',
+  'account.tokenNone': '尚未產生金鑰。',
+  'account.tokenSet': '金鑰建立於 {date}，最後使用：{used}。',
+  'account.never': '從未使用',
+  'account.tokenCopyNow': '請現在複製金鑰 — 之後不會再顯示。',
+  'account.tokenRevoked': '金鑰已撤銷。',
+  'account.tokenFailed': '無法變更金鑰',
+  'account.webhookTitle': '通知',
+  'account.webhookHint':
+    '資料太久沒更新或發票中獎時，會以純文字 POST 到這個 https 網址（ntfy、Discord、Slack 都可以）。留空代表不通知。',
+  'account.webhookSaved': '通知網址已儲存。',
+  'account.webhookFailed': '無法儲存通知網址',
+
   'source.override': '你的修正',
   'source.merchant': '商家規則',
   'source.cache': '快取結果',
@@ -203,6 +230,7 @@ const en: Record<string, Phrase> = {
   'nav.income': 'Income',
   'nav.review': 'Review',
   'nav.stats': 'Stats',
+  'nav.account': 'Account',
 
   'action.importCsv': 'Import CSV',
   'action.reading': 'Reading…',
@@ -217,9 +245,20 @@ const en: Record<string, Phrase> = {
   'action.setBudget': 'Set budget',
   'action.loadMore': 'Load more',
   'action.delete': 'Delete',
+  'action.createAccount': 'Create account',
+  'action.signOut': 'Sign out',
+  'action.createToken': 'Create import token',
+  'action.replaceToken': 'Replace token',
+  'action.revoke': 'Revoke',
 
   'login.password': 'Password',
   'login.failed': 'sign in failed',
+  'login.username': 'Username',
+  'login.registerFailed': 'could not create the account',
+  'login.toRegister': 'No account? Create one',
+  'login.toSignIn': 'Already have an account? Sign in',
+  'login.registerHint':
+    'Usernames are 3–32 characters: lowercase letters, digits and _ . -. Passwords need at least 8 characters.',
 
   'search.placeholder': 'Search merchants and item descriptions…',
 
@@ -312,6 +351,22 @@ const en: Record<string, Phrase> = {
   'stats.syncedThrough': 'Synced through {date} · model {model}',
   'stats.never': 'never',
   'stats.unknown': '(unknown)',
+
+  'account.since': 'Joined {date}',
+  'account.tokenTitle': 'Watch-folder import',
+  'account.tokenHint':
+    'scripts/watch-folder.mjs uses this token to upload CSVs into your account. It is shown once, and replacing it stops the old one working immediately.',
+  'account.tokenNone': 'No token yet.',
+  'account.tokenSet': 'Token created {date}, last used {used}.',
+  'account.never': 'never',
+  'account.tokenCopyNow': 'Copy the token now — it will not be shown again.',
+  'account.tokenRevoked': 'Token revoked.',
+  'account.tokenFailed': 'could not change the token',
+  'account.webhookTitle': 'Notifications',
+  'account.webhookHint':
+    'When your data goes stale or an invoice wins a prize, a plain-text message is POSTed to this https URL (ntfy, Discord, Slack). Leave it empty for none.',
+  'account.webhookSaved': 'Notification URL saved.',
+  'account.webhookFailed': 'could not save the notification URL',
 
   'source.override': 'Your correction',
   'source.merchant': 'Merchant rule',

@@ -167,9 +167,25 @@ the failure that would otherwise ship.
 Clicking a category writes a `user_override` and **re-resolves every affected
 existing item immediately** — a correction that only applied going forward
 would feel broken, because the chart you are staring at would not change. The
-response is the number of rows updated. The override also poisons the cache
-entry for that key in both KV and the table, so a wrong answer is not still
-sitting there for a future rebuild.
+response is the number of rows updated. The override belongs to the account
+that made it and changes only that account's items.
+
+### One site, many people
+
+Anyone who reaches the site can make an account, and each account sees only
+its own invoices. That is enforced in one place: every function in
+`db/queries.ts` that reads or writes personal data takes an account id as a
+required argument, and every statement filters on it. The same invoice number
+imported by two people is two rows, keyed `(account_id, inv_num)` rather than
+by the number alone — a global key would let one account's import rewrite
+another's, and would answer "already imported" about someone else's carrier.
+
+Categories, rules and the classifier cache stay shared, because they describe
+products rather than people. A correction is private to whoever made it and no
+longer deletes the shared cache entry: one person's preference is not evidence
+the shared answer is wrong for everyone else. The watch folder authenticates
+with a per-account token that the dashboard shows once and the database keeps
+only as a hash.
 
 ### Two invariants, not five
 
@@ -178,8 +194,8 @@ to file import, and they matter more than they did:
 
 1. **Idempotent.** Exports overlap by design — you download the last few months
    every time — so re-importing must not duplicate anything. Enforced
-   structurally by `invoice.inv_num` and `UNIQUE (inv_num, row_num)`, not by
-   checking before inserting.
+   structurally by `PRIMARY KEY (account_id, inv_num)` and
+   `UNIQUE (account_id, inv_num, row_num)`, not by checking before inserting.
 2. **Monotone.** An import never deletes or blanks an existing invoice. Header
    fields update; items are only added.
 
@@ -221,6 +237,8 @@ scripts/               watch-folder uploader, password hasher
 Boundaries that hold it together:
 
 - **All SQL is in `db/queries.ts`.** No query string exists anywhere else.
+- **Every query on personal data takes an account id**, as a required
+  argument, and filters on it.
 - **`import/csv.ts` is pure** — no HTTP, no database. Same boundary the old
   MOF client had, and the reason the importer is fully testable.
 - **`categorize/rules.ts` is pure.** Only `llm.ts` calls a model, only on a
@@ -247,17 +265,18 @@ npm run db:apply          # the deployed database
 npm run db:apply:local    # the one `wrangler dev` uses
 
 npx wrangler secret put SESSION_SECRET        # any long random string
-npm run hash-password 'your password'         # → OWNER_PASSWORD_HASH
-npx wrangler secret put OWNER_PASSWORD_HASH
 npx wrangler secret put ANTHROPIC_API_KEY     # optional; without it, no step 5
-npx wrangler secret put IMPORT_TOKEN          # optional; for the watch folder
-npx wrangler secret put NOTIFY_WEBHOOK        # optional; staleness nudges
 
 npm run deploy
 ```
 
-Then export a CSV from the carrier portal and drag it into the dashboard, or
-set up the watch folder — see `docs/IMPORT.md`.
+Then open the site and create an account. Export a CSV from the carrier portal
+and drag it into the dashboard, or create an import token from the account
+menu and set up the watch folder — see `docs/IMPORT.md`.
+
+Upgrading a single-user install: apply `src/db/migrations/005-accounts.sql`
+(its header has the exact commands, backup first), deploy straight after, and
+sign in as `owner` with the password you already use.
 
 ### Development
 
@@ -272,14 +291,16 @@ npm run typecheck
 
 ## Deliberately not built
 
-Multi-user, bank and card import, envelopes and per-category caps and goals,
-manual expense entry, and a native mobile app. `docs/SPEC.md` explains each;
-they are decisions, not a backlog. Manual entry is worth restating: if it needs
-typing it will not get used, and the whole premise was that it does not.
+Bank and card import, envelopes and per-category caps and goals, manual
+expense entry, and a native mobile app. `docs/SPEC.md` explains each; they are
+decisions, not a backlog. Manual entry is worth restating: if it needs typing
+it will not get used, and the whole premise was that it does not.
 
-One of those decisions was reversed. Budgets were originally ruled out with the
-rest of the personal-finance feature set; a single monthly total is now in, and
-`SPEC.md` records why.
+Two decisions were reversed, and `SPEC.md` records why. Budgets were ruled out
+with the rest of the personal-finance feature set; a single monthly total is
+now in. Multi-user was ruled out because it meant holding other people's
+carrier credentials; the CSV import took every credential out of the Worker,
+and the reason with it, so anyone can now sign up.
 
 ## Documents
 

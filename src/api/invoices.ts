@@ -11,9 +11,13 @@ import type { IsoDate } from '../types.js';
 
 const MAX_LIMIT = 200;
 
-export async function handleInvoiceList(db: D1Database, url: URL): Promise<Response> {
+export async function handleInvoiceList(
+  db: D1Database,
+  accountId: number,
+  url: URL,
+): Promise<Response> {
   const limit = intParam(url, 'limit', 50, MAX_LIMIT);
-  const rows = await listInvoices(db, {
+  const rows = await listInvoices(db, accountId, {
     from: optionalDate(url, 'from'),
     to: optionalDate(url, 'to'),
     categoryKey: optionalString(url, 'category'),
@@ -33,10 +37,15 @@ export async function handleInvoiceList(db: D1Database, url: URL): Promise<Respo
   });
 }
 
-export async function handleInvoiceDetail(db: D1Database, invNum: string): Promise<Response> {
-  const invoice = await getInvoice(db, invNum);
+/** Another account's invoice number is a 404, the same as one that does not exist. */
+export async function handleInvoiceDetail(
+  db: D1Database,
+  accountId: number,
+  invNum: string,
+): Promise<Response> {
+  const invoice = await getInvoice(db, accountId, invNum);
   if (!invoice) throw notFound(`no invoice ${invNum}`);
-  const items = await getItemsForInvoice(db, invNum);
+  const items = await getItemsForInvoice(db, accountId, invNum);
 
   return json({
     invoice: toInvoiceSummary({ ...invoice, item_count: items.length }),

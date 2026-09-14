@@ -17,10 +17,11 @@ import type { IsoDate, Unix } from '../types.js';
 
 export async function handleGetBudget(
   db: D1Database,
+  accountId: number,
   url: URL,
   today: IsoDate,
 ): Promise<Response> {
-  return json(await describe(db, monthParam(url, today), today));
+  return json(await describe(db, accountId, monthParam(url, today), today));
 }
 
 /**
@@ -30,6 +31,7 @@ export async function handleGetBudget(
  */
 export async function handleSetBudget(
   db: D1Database,
+  accountId: number,
   request: Request,
   url: URL,
   today: IsoDate,
@@ -43,8 +45,8 @@ export async function handleSetBudget(
     throw badRequest('amount must be a positive integer of NT$');
   }
 
-  await upsertBudget(db, { month, amount, now });
-  return json(await describe(db, month, today));
+  await upsertBudget(db, accountId, { month, amount, now });
+  return json(await describe(db, accountId, month, today));
 }
 
 /**
@@ -54,19 +56,20 @@ export async function handleSetBudget(
  */
 export async function handleDeleteBudget(
   db: D1Database,
+  accountId: number,
   url: URL,
   today: IsoDate,
 ): Promise<Response> {
   const month = monthParam(url, today);
-  await deleteBudget(db, month);
-  return json(await describe(db, month, today));
+  await deleteBudget(db, accountId, month);
+  return json(await describe(db, accountId, month, today));
 }
 
-async function describe(db: D1Database, month: string, today: IsoDate) {
+async function describe(db: D1Database, accountId: number, month: string, today: IsoDate) {
   const { from, to } = monthRange(month);
   const [row, totals] = await Promise.all([
-    getEffectiveBudget(db, month),
-    totalsForRange(db, from, to),
+    getEffectiveBudget(db, accountId, month),
+    totalsForRange(db, accountId, from, to),
   ]);
 
   return {

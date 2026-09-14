@@ -20,11 +20,15 @@
       change. See web/src/i18n.ts.
     -->
     <div id="login" class="login" hidden>
+      <!-- Sign-in and sign-up share this form; main.ts swaps the button and endpoint. -->
       <form id="login-form">
         <h1>Invoice Gang</h1>
-        <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="login.password" />
-        <button type="submit" data-i18n="action.signIn"></button>
+        <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" data-i18n-placeholder="login.username" required />
+        <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="login.password" required />
+        <p id="login-hint" class="hint" data-i18n="login.registerHint" hidden></p>
+        <button type="submit" id="login-submit"></button>
         <p id="login-error" class="error" hidden></p>
+        <button type="button" id="login-switch" class="linky"></button>
       </form>
     </div>
 
@@ -45,6 +49,10 @@
           <input id="csv" type="file" accept=".csv,text/csv" hidden />
           <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
           <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
+          <!-- The username; opens the account dialog. -->
+          <button id="account" type="button" class="linky" data-i18n-title="nav.account"></button>
+          <!-- Also in the account dialog, but signing out should never need finding. -->
+          <button id="sign-out-top" type="button" data-i18n="action.signOut"></button>
         </div>
       </header>
 
@@ -112,6 +120,38 @@
         <div class="preview-actions">
           <button id="preview-cancel" data-i18n="action.cancel"></button>
           <button id="preview-confirm" class="upload" data-i18n="action.importSelected"></button>
+        </div>
+      </dialog>
+
+      <dialog id="account-dialog">
+        <div class="account-head">
+          <h2 id="account-name"></h2>
+          <p id="account-since" class="muted"></p>
+        </div>
+
+        <section class="account-section">
+          <h3 data-i18n="account.tokenTitle"></h3>
+          <p class="hint" data-i18n="account.tokenHint"></p>
+          <p id="token-status" class="muted"></p>
+          <code id="token-value" class="token" hidden></code>
+          <div class="account-actions">
+            <button id="token-create" type="button" class="upload"></button>
+            <button id="token-revoke" type="button" data-i18n="action.revoke" hidden></button>
+          </div>
+        </section>
+
+        <section class="account-section">
+          <h3 data-i18n="account.webhookTitle"></h3>
+          <p class="hint" data-i18n="account.webhookHint"></p>
+          <form id="webhook-form" class="account-actions">
+            <input id="webhook-url" type="url" inputmode="url" placeholder="https://ntfy.sh/…" />
+            <button type="submit" data-i18n="action.save"></button>
+          </form>
+        </section>
+
+        <div class="preview-actions">
+          <button id="sign-out" type="button" data-i18n="action.signOut"></button>
+          <button id="account-close" type="button" data-i18n="action.close"></button>
         </div>
       </dialog>
     </div>

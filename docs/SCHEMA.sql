@@ -1,29 +1,66 @@
 -- Invoice Gang — D1 (SQLite) schema
 -- Runnable as-is:  wrangler d1 execute invoice-gang --file=./SCHEMA.sql
 --
+-- The annotated copy. src/db/schema.sql is the same with IF NOT EXISTS added
+-- so it can be re-applied; a database from before accounts needs
+-- src/db/migrations/005-accounts.sql.
+--
 -- Conventions:
 --   * money is INTEGER new taiwan dollars, never REAL
 --   * timestamps are INTEGER unix seconds, UTC
 --   * dates from the MOF API are stored as TEXT YYYY-MM-DD (normalized from
 --     the API YYYY/MM/DD form) so lexical order equals chronological order
+--   * every table holding a person's data carries account_id, and every query
+--     against it filters on it. Categories, rules, winning numbers and the
+--     classifier cache describe products and draws, not people, and are
+--     shared by every account.
 
 PRAGMA foreign_keys = ON;
 
+-- ---------------------------------------------------------------- accounts --
+-- One row per person. Sign-up is open, so nothing an account writes is
+-- trusted beyond that account.
+CREATE TABLE account (
+    id              INTEGER PRIMARY KEY,
+    username        TEXT NOT NULL UNIQUE,  -- stored lowercase
+    -- pbkdf2$<iterations>$<salt b64>$<hash b64>. NULL only on the `owner` row
+    -- migration 005 makes from a single-user install, until its first sign-in
+    -- copies OWNER_PASSWORD_HASH in.
+    password_hash   TEXT,
+    notify_webhook  TEXT,                  -- https URL for staleness and prize nudges
+    created_at      INTEGER NOT NULL
+);
+
+-- The watch-folder script's credential, one per account. Only a SHA-256 of
+-- the token is kept: the token is 256 random bits, so the hash cannot be
+-- walked back, and a leaked table authenticates nothing.
+CREATE TABLE import_token (
+    account_id    INTEGER PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
+    token_hash    TEXT NOT NULL UNIQUE,   -- hex
+    created_at    INTEGER NOT NULL,
+    last_used_at  INTEGER
+);
+
 -- ---------------------------------------------------------------- carriers --
--- One row in v1. Modeled as a table anyway so the sync code is written against
--- "a carrier" rather than an implicit global, which is what makes the
--- single-user decision reversible later without a rewrite.
+-- One per account in v1, created by the account's first import.
 CREATE TABLE carrier (
     id            INTEGER PRIMARY KEY,
+    account_id    INTEGER NOT NULL REFERENCES account(id),
     card_type     TEXT NOT NULL DEFAULT '3J0002',
-    card_no       TEXT NOT NULL UNIQUE,   -- 手機條碼; the secret lives in env
+    card_no       TEXT NOT NULL,          -- a label; nothing logs in with it
     label         TEXT,
-    created_at    INTEGER NOT NULL
+    created_at    INTEGER NOT NULL,
+    UNIQUE (account_id, card_no)
 );
 
 -- ---------------------------------------------------------------- invoices --
+-- Keyed per account rather than by the invoice number alone. The number is
+-- unique in Taiwan, but a global key would let one account's import rewrite
+-- another account's header, and the preview's "already imported" flag would
+-- tell a stranger which invoice numbers someone else holds.
 CREATE TABLE invoice (
-    inv_num           TEXT PRIMARY KEY,   -- AB12345678, globally unique
+    account_id        INTEGER NOT NULL REFERENCES account(id),
+    inv_num           TEXT NOT NULL,      -- AB12345678
     carrier_id        INTEGER NOT NULL REFERENCES carrier(id),
     inv_date          TEXT NOT NULL,      -- YYYY-MM-DD
     inv_period        TEXT,               -- ROC period, e.g. 11304
@@ -39,21 +76,22 @@ CREATE TABLE invoice (
     detail_error      TEXT,
 
     first_seen_at     INTEGER NOT NULL,
-    updated_at        INTEGER NOT NULL
+    updated_at        INTEGER NOT NULL,
+
+    PRIMARY KEY (account_id, inv_num)
 );
 
-CREATE INDEX idx_invoice_date    ON invoice(inv_date DESC);
-CREATE INDEX idx_invoice_seller  ON invoice(seller_ban);
+CREATE INDEX idx_invoice_date    ON invoice(account_id, inv_date DESC);
+CREATE INDEX idx_invoice_seller  ON invoice(account_id, seller_ban);
 CREATE INDEX idx_invoice_period  ON invoice(inv_period);
--- the detail queue: newest first. Partial index stays small once most
--- invoices have been fetched.
 CREATE INDEX idx_invoice_pending ON invoice(inv_date DESC)
     WHERE detail_fetched_at IS NULL;
 
 -- ------------------------------------------------------------------- items --
 CREATE TABLE invoice_item (
     id              INTEGER PRIMARY KEY,
-    inv_num         TEXT NOT NULL REFERENCES invoice(inv_num) ON DELETE CASCADE,
+    account_id      INTEGER NOT NULL,
+    inv_num         TEXT NOT NULL,
     row_num         INTEGER NOT NULL,
     description     TEXT NOT NULL,        -- raw merchant text, never edited
     item_key        TEXT NOT NULL,        -- normalized; see CATEGORIZATION.md
@@ -71,12 +109,14 @@ CREATE TABLE invoice_item (
     category_source TEXT,                 -- override|merchant|cache|llm|none
     categorized_at  INTEGER,
 
-    UNIQUE (inv_num, row_num)             -- makes detail re-fetch idempotent
+    FOREIGN KEY (account_id, inv_num)
+        REFERENCES invoice(account_id, inv_num) ON DELETE CASCADE,
+    UNIQUE (account_id, inv_num, row_num) -- makes re-importing idempotent
 );
 
-CREATE INDEX idx_item_key      ON invoice_item(item_key);
+CREATE INDEX idx_item_key      ON invoice_item(account_id, item_key);
 CREATE INDEX idx_item_category ON invoice_item(category_id);
-CREATE INDEX idx_item_uncat    ON invoice_item(id) WHERE category_id IS NULL;
+CREATE INDEX idx_item_uncat    ON invoice_item(account_id) WHERE category_id IS NULL;
 
 -- -------------------------------------------------------------- categories --
 CREATE TABLE category (
@@ -125,7 +165,7 @@ CREATE INDEX idx_rule_lookup ON merchant_rule(match_type, priority);
 -- Matches the product description rather than the seller, and outranks
 -- merchant_rule: a phone charger bought at 7-ELEVEN is electronics, not
 -- groceries. `pattern` is a substring of the normalized item_key.
-CREATE TABLE IF NOT EXISTS item_rule (
+CREATE TABLE item_rule (
     id          INTEGER PRIMARY KEY,
     pattern     TEXT NOT NULL UNIQUE,
     category_id INTEGER NOT NULL REFERENCES category(id),
@@ -133,24 +173,26 @@ CREATE TABLE IF NOT EXISTS item_rule (
     note        TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_item_rule_lookup ON item_rule(priority);
+CREATE INDEX idx_item_rule_lookup ON item_rule(priority);
 
 -- --------------------------------------------------------------- overrides --
--- The correction loop. Outranks everything else. Scope item keys on item_key,
--- scope merchant keys on seller_ban.
+-- The correction loop. Outranks everything else, for the account that wrote
+-- it and nobody else. Scope item keys on item_key, scope merchant keys on
+-- seller_ban.
 CREATE TABLE user_override (
     id          INTEGER PRIMARY KEY,
+    account_id  INTEGER NOT NULL REFERENCES account(id),
     scope       TEXT NOT NULL CHECK (scope IN ('item','merchant')),
     key         TEXT NOT NULL,
     category_id INTEGER NOT NULL REFERENCES category(id),
     created_at  INTEGER NOT NULL,
-    UNIQUE (scope, key)
+    UNIQUE (account_id, scope, key)
 );
 
 -- -------------------------------------------------------- classifier cache --
 -- Mirrors the KV cache. KV is the hot read path; this table exists so the
 -- cache is inspectable, exportable and rebuildable — and so hit-rate stats
--- can be computed with SQL instead of a KV scan.
+-- can be computed with SQL instead of a KV scan. Shared by every account.
 CREATE TABLE item_category_cache (
     item_key    TEXT PRIMARY KEY,
     category_id INTEGER NOT NULL REFERENCES category(id),
@@ -162,6 +204,7 @@ CREATE TABLE item_category_cache (
 );
 
 -- -------------------------------------------------------------- sync state --
+-- Keyed by carrier, and a carrier belongs to one account.
 CREATE TABLE sync_state (
     carrier_id       INTEGER PRIMARY KEY REFERENCES carrier(id),
     synced_through   TEXT,                -- YYYY-MM-DD watermark; see SYNC.md
@@ -171,6 +214,7 @@ CREATE TABLE sync_state (
 
 CREATE TABLE sync_run (
     id                INTEGER PRIMARY KEY,
+    account_id        INTEGER NOT NULL REFERENCES account(id),
     started_at        INTEGER NOT NULL,
     finished_at       INTEGER,
     trigger           TEXT NOT NULL,      -- cron|manual|backfill
@@ -187,9 +231,11 @@ CREATE TABLE sync_run (
     error             TEXT                -- credential values must be scrubbed
 );
 
-CREATE INDEX idx_sync_run_time ON sync_run(started_at DESC);
+CREATE INDEX idx_sync_run_time ON sync_run(account_id, started_at DESC);
 
 -- ----------------------------------------------------------------- prizes --
+-- Winning numbers are the same for everyone; a hit belongs to the account
+-- whose invoice won.
 CREATE TABLE winning_number (
     inv_period  TEXT NOT NULL,            -- 11304
     prize_class TEXT NOT NULL,            -- special|grand|first|additional
@@ -199,20 +245,25 @@ CREATE TABLE winning_number (
 );
 
 CREATE TABLE prize_hit (
-    inv_num      TEXT PRIMARY KEY REFERENCES invoice(inv_num) ON DELETE CASCADE,
+    account_id   INTEGER NOT NULL,
+    inv_num      TEXT NOT NULL,
     inv_period   TEXT NOT NULL,
     prize_class  TEXT NOT NULL,
     amount       INTEGER NOT NULL,
     matched_at   INTEGER NOT NULL,
-    notified_at  INTEGER
+    notified_at  INTEGER,
+    PRIMARY KEY (account_id, inv_num),
+    FOREIGN KEY (account_id, inv_num)
+        REFERENCES invoice(account_id, inv_num) ON DELETE CASCADE
 );
 
 -- ----------------------------------------------------------------- income --
 -- Manually entered — the one number in this system typed rather than derived
 -- from an invoice. Its own table, never mixed into invoice_item, so the
 -- invoice pipeline is untouched.
-CREATE TABLE IF NOT EXISTS income (
+CREATE TABLE income (
     id          INTEGER PRIMARY KEY,
+    account_id  INTEGER NOT NULL REFERENCES account(id),
     date        TEXT NOT NULL,        -- YYYY-MM-DD
     amount      INTEGER NOT NULL,     -- NT$, positive
     source      TEXT NOT NULL,
@@ -220,7 +271,7 @@ CREATE TABLE IF NOT EXISTS income (
     created_at  INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_income_date ON income(date DESC);
+CREATE INDEX idx_income_date ON income(account_id, date DESC);
 
 -- ----------------------------------------------------------------- budget --
 -- The one forward-looking number in the schema. Everything else here records
@@ -233,18 +284,21 @@ CREATE INDEX IF NOT EXISTS idx_income_date ON income(date DESC);
 -- rather than held as a single settings row, because a single row cannot say
 -- what August's budget was once September's has replaced it — every past
 -- month would be rejudged against today's number.
-CREATE TABLE IF NOT EXISTS budget (
-    month       TEXT PRIMARY KEY,     -- YYYY-MM, the month it takes effect
+CREATE TABLE budget (
+    account_id  INTEGER NOT NULL REFERENCES account(id),
+    month       TEXT NOT NULL,        -- YYYY-MM, the month it takes effect
     amount      INTEGER NOT NULL,     -- NT$, positive
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (account_id, month)
 );
 
 -- -------------------------------------------------------------- dashboard --
--- Monthly spend by category. Defined here so the API layer has no aggregation
--- SQL of its own to drift out of sync.
+-- Monthly spend by category, per account. Defined here so the API layer has
+-- no aggregation SQL of its own to drift out of sync.
 CREATE VIEW v_monthly_category AS
-SELECT substr(i.inv_date, 1, 7) AS month,
+SELECT i.account_id             AS account_id,
+       substr(i.inv_date, 1, 7) AS month,
        c.key                    AS category_key,
        c.label_en               AS category_en,
        c.label_zh               AS category_zh,
@@ -252,9 +306,9 @@ SELECT substr(i.inv_date, 1, 7) AS month,
        -- net of invoice-level discounts; see src/import/allocate.ts
        SUM(COALESCE(it.net_amount, it.amount)) AS total
 FROM invoice_item it
-JOIN invoice i ON i.inv_num = it.inv_num
+JOIN invoice i ON i.account_id = it.account_id AND i.inv_num = it.inv_num
 LEFT JOIN category c ON c.id = it.category_id
 WHERE (i.inv_status IS NULL OR i.inv_status <> '作廢')
   AND it.amount >= 0
   AND it.excluded = 0
-GROUP BY month, c.key;
+GROUP BY i.account_id, month, c.key;

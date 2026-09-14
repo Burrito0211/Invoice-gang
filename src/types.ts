@@ -19,40 +19,30 @@ export interface Env {
 
   // Secrets — `wrangler secret put`, never wrangler.jsonc, never the bundle.
   /**
-   * Labels the carrier row. Not a credential any more — nothing logs in — and
-   * optional: unset just means the row is named `default`. Resolve it through
-   * `carrierKey()` so every lookup agrees with what `ensureCarrier` created.
+   * Optional. With it set, items no rule recognises go to the model. Sign-up
+   * is open, so any account's import can then spend it.
    */
-  EINVOICE_CARD_NO?: string;
   ANTHROPIC_API_KEY: string;
+  /** Signs every session cookie. Rotating it signs every account out. */
   SESSION_SECRET: string;
-  OWNER_PASSWORD_HASH: string;
   /**
-   * Optional. When set, enables bearer-token auth on `POST /api/import` so
-   * the local crawler can upload without a login cookie. Absent means
-   * cookie-only — the token path never opens by accident.
+   * Legacy, and optional. The single-user install kept its one password hash
+   * here. Migration 005 turns that install's data into an account named
+   * `owner` with no hash of its own; that account's first sign-in is checked
+   * against this value and copies it into the row, after which it is never
+   * read again and can be deleted.
    */
-  IMPORT_TOKEN?: string;
-  /**
-   * Optional webhook the staleness and prize notifications POST to — ntfy,
-   * Discord, Slack, anything that accepts a plain-text body. Unset means log
-   * only, still visible through `wrangler tail`.
-   */
-  NOTIFY_WEBHOOK?: string;
+  OWNER_PASSWORD_HASH?: string;
 
   // Plain vars. Arrive as strings; parsed by loadConfig().
   LLM_BATCH_SIZE?: string;
-  /**
-   * `YYYY-MM-DD` recorded as the carrier's creation date on first import.
-   * Cosmetic now — the export decides how much history arrives, not a window.
-   */
-  EINVOICE_CARRIER_SINCE?: string;
 }
 
 // ------------------------------------------------------------------ carrier
 
 export interface Carrier {
   id: number;
+  account_id: number;
   card_type: string;
   card_no: string;
   label: string | null;
@@ -83,6 +73,7 @@ export interface InvoiceDetailRow {
 }
 
 export interface InvoiceRow {
+  account_id: number;
   inv_num: string;
   carrier_id: number;
   inv_date: IsoDate;
@@ -103,6 +94,7 @@ export type CategorySource = 'override' | 'merchant' | 'cache' | 'llm' | 'none';
 
 export interface ItemRow {
   id: number;
+  account_id: number;
   inv_num: string;
   row_num: number;
   description: string;
@@ -145,6 +137,7 @@ export interface SyncRunTotals {
 
 export interface SyncRunRow extends SyncRunTotals {
   id: number;
+  account_id: number;
   started_at: Unix;
   finished_at: Unix | null;
   trigger: SyncTrigger;
@@ -157,4 +150,3 @@ export interface SyncRunRow extends SyncRunTotals {
 // ------------------------------------------------------------------ prizes
 
 export type PrizeClass = 'special' | 'grand' | 'first' | 'additional';
-

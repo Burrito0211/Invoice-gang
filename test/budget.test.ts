@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { daysInMonth, monthRange, pace } from '../src/budget/pace.js';
 import { deleteBudget, getEffectiveBudget, upsertBudget } from '../src/db/queries.js';
 import { handleGetBudget, handleSetBudget } from '../src/api/budget.js';
-import { createTestDb, seedCarrier } from './helpers/d1.js';
+import { createTestDb, seedAccount } from './helpers/d1.js';
 
 describe('daysInMonth', () => {
   it('knows the short months and the leap years', () => {
@@ -124,49 +124,49 @@ describe('carry-forward', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    await seedCarrier(db, 1_750_000_000);
+    await seedAccount(db, 1_750_000_000);
   });
 
   afterEach(() => db.close());
 
   it('applies the newest budget at or before the month asked for', async () => {
-    await upsertBudget(db, { month: '2026-07', amount: 18_000, now: 1 });
+    await upsertBudget(db, 1, { month: '2026-07', amount: 18_000, now: 1 });
 
     // A month with no row of its own inherits rather than being unbudgeted.
-    expect((await getEffectiveBudget(db, '2026-09'))?.amount).toBe(18_000);
-    expect((await getEffectiveBudget(db, '2026-07'))?.amount).toBe(18_000);
+    expect((await getEffectiveBudget(db, 1, '2026-09'))?.amount).toBe(18_000);
+    expect((await getEffectiveBudget(db, 1, '2026-07'))?.amount).toBe(18_000);
   });
 
   it('does not reach backwards, so a past month keeps the figure it was lived under', async () => {
-    await upsertBudget(db, { month: '2026-09', amount: 25_000, now: 1 });
-    expect(await getEffectiveBudget(db, '2026-08')).toBeNull();
+    await upsertBudget(db, 1, { month: '2026-09', amount: 25_000, now: 1 });
+    expect(await getEffectiveBudget(db, 1, '2026-08')).toBeNull();
   });
 
   it('lets a later month supersede an earlier one', async () => {
-    await upsertBudget(db, { month: '2026-07', amount: 18_000, now: 1 });
-    await upsertBudget(db, { month: '2026-09', amount: 25_000, now: 2 });
+    await upsertBudget(db, 1, { month: '2026-07', amount: 18_000, now: 1 });
+    await upsertBudget(db, 1, { month: '2026-09', amount: 25_000, now: 2 });
 
-    expect((await getEffectiveBudget(db, '2026-08'))?.amount).toBe(18_000);
-    expect((await getEffectiveBudget(db, '2026-09'))?.amount).toBe(25_000);
-    expect((await getEffectiveBudget(db, '2026-12'))?.amount).toBe(25_000);
+    expect((await getEffectiveBudget(db, 1, '2026-08'))?.amount).toBe(18_000);
+    expect((await getEffectiveBudget(db, 1, '2026-09'))?.amount).toBe(25_000);
+    expect((await getEffectiveBudget(db, 1, '2026-12'))?.amount).toBe(25_000);
   });
 
   it('updates in place rather than stacking rows for the same month', async () => {
-    await upsertBudget(db, { month: '2026-09', amount: 20_000, now: 1 });
-    await upsertBudget(db, { month: '2026-09', amount: 22_000, now: 2 });
+    await upsertBudget(db, 1, { month: '2026-09', amount: 20_000, now: 1 });
+    await upsertBudget(db, 1, { month: '2026-09', amount: 22_000, now: 2 });
 
-    const row = await getEffectiveBudget(db, '2026-09');
+    const row = await getEffectiveBudget(db, 1, '2026-09');
     expect(row?.amount).toBe(22_000);
     const count = await db.prepare(`SELECT COUNT(*) AS n FROM budget`).first<{ n: number }>();
     expect(count?.n).toBe(1);
   });
 
   it('falls back to the previous change point when one is deleted', async () => {
-    await upsertBudget(db, { month: '2026-07', amount: 18_000, now: 1 });
-    await upsertBudget(db, { month: '2026-09', amount: 25_000, now: 2 });
+    await upsertBudget(db, 1, { month: '2026-07', amount: 18_000, now: 1 });
+    await upsertBudget(db, 1, { month: '2026-09', amount: 25_000, now: 2 });
 
-    expect(await deleteBudget(db, '2026-09')).toBe(true);
-    expect((await getEffectiveBudget(db, '2026-09'))?.amount).toBe(18_000);
+    expect(await deleteBudget(db, 1, '2026-09')).toBe(true);
+    expect((await getEffectiveBudget(db, 1, '2026-09'))?.amount).toBe(18_000);
   });
 });
 
@@ -175,14 +175,14 @@ describe('the endpoint', () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    await seedCarrier(db, 1_750_000_000);
+    await seedAccount(db, 1_750_000_000);
   });
 
   afterEach(() => db.close());
 
   const get = async (month: string, today: string) =>
     (await (
-      await handleGetBudget(db, new URL(`https://x/api/budget?month=${month}`), today)
+      await handleGetBudget(db, 1, new URL(`https://x/api/budget?month=${month}`), today)
     ).json()) as Record<string, unknown>;
 
   it('reports unset before a budget exists', async () => {
@@ -193,15 +193,15 @@ describe('the endpoint', () => {
   });
 
   it('says which month the figure came from when it was carried forward', async () => {
-    await upsertBudget(db, { month: '2026-07', amount: 18_000, now: 1 });
+    await upsertBudget(db, 1, { month: '2026-07', amount: 18_000, now: 1 });
     const body = await get('2026-09', '2026-09-12');
     expect(body.amount).toBe(18_000);
     expect(body.effective_from).toBe('2026-07');
   });
 
   it('defaults to the current month when none is given', async () => {
-    await upsertBudget(db, { month: '2026-09', amount: 20_000, now: 1 });
-    const response = await handleGetBudget(db, new URL('https://x/api/budget'), '2026-09-12');
+    await upsertBudget(db, 1, { month: '2026-09', amount: 20_000, now: 1 });
+    const response = await handleGetBudget(db, 1, new URL('https://x/api/budget'), '2026-09-12');
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.month).toBe('2026-09');
   });
@@ -211,7 +211,7 @@ describe('the endpoint', () => {
       method: 'PUT',
       body: JSON.stringify({ month: '2026-09', amount: 20_000 }),
     });
-    const response = await handleSetBudget(db, request, new URL('https://x/api/budget'), '2026-09-12', 1);
+    const response = await handleSetBudget(db, 1, request, new URL('https://x/api/budget'), '2026-09-12', 1);
     const body = (await response.json()) as Record<string, unknown>;
 
     expect(body.amount).toBe(20_000);
@@ -226,7 +226,7 @@ describe('the endpoint', () => {
         body: JSON.stringify({ month: '2026-09', amount }),
       });
       await expect(
-        handleSetBudget(db, request, new URL('https://x/api/budget'), '2026-09-12', 1),
+        handleSetBudget(db, 1, request, new URL('https://x/api/budget'), '2026-09-12', 1),
       ).rejects.toThrow(/positive integer/);
     }
   });
@@ -234,7 +234,7 @@ describe('the endpoint', () => {
   it('refuses a month that is not YYYY-MM', async () => {
     for (const month of ['2026-13', '2026-9', '2026', 'september']) {
       await expect(
-        handleGetBudget(db, new URL(`https://x/api/budget?month=${month}`), '2026-09-12'),
+        handleGetBudget(db, 1, new URL(`https://x/api/budget?month=${month}`), '2026-09-12'),
       ).rejects.toThrow(/YYYY-MM/);
     }
   });

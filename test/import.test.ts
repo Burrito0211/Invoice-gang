@@ -24,7 +24,7 @@ import {
   totalsForRange,
 } from '../src/db/queries.js';
 import { fromApiDate } from '../src/lib/dates.js';
-import { createTestDb, createTestKv, seedCarrier } from './helpers/d1.js';
+import { createTestDb, createTestKv, seedAccount } from './helpers/d1.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CSV = readFileSync(join(here, 'fixtures', 'carrier-export.csv'), 'utf8');
@@ -41,13 +41,13 @@ beforeEach(async () => {
   // would make an existing row look new — which no real clock does.
   let t = 1_780_000_000;
   clock = () => (t += 1);
-  await seedCarrier(db, 1_750_000_000);
+  await seedAccount(db, 1_750_000_000);
 });
 
 afterEach(() => db.close());
 
 const deps = () => ({ db, kv, now: clock, llm: null });
-const options = { carrierId: 1, trigger: 'manual' as const };
+const options = { accountId: 1, carrierId: 1, trigger: 'manual' as const };
 
 async function count(table: string): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>();
@@ -225,7 +225,7 @@ describe('import status', () => {
     // import an hour old was younger than the reference point and aged to -1.
     await importCarrierCsv(CSV, deps(), options);
 
-    const response = await handleImportStatus(db, 1, clock(), 10);
+    const response = await handleImportStatus(db, 1, 1, clock(), 10);
     const body = (await response.json()) as {
       age_days: number | null;
       stale: boolean;
@@ -238,7 +238,7 @@ describe('import status', () => {
   });
 
   it('reports stale when nothing has ever been imported', async () => {
-    const response = await handleImportStatus(db, 1, clock(), 10);
+    const response = await handleImportStatus(db, 1, 1, clock(), 10);
     const body = (await response.json()) as { age_days: number | null; stale: boolean };
 
     expect(body.age_days).toBeNull();
@@ -297,7 +297,7 @@ describe('discount allocation through an import', () => {
     // adjustment and file it under some spending category.
     await importCarrierCsv(CSV, deps(), options);
 
-    const queued = await selectUncategorizedItems(db, 100);
+    const queued = await selectUncategorizedItems(db, 1, 100);
     expect(queued.some((r) => r.description.includes('折扣'))).toBe(false);
     expect(queued.length).toBeGreaterThan(0);
   });
@@ -320,7 +320,7 @@ describe('the review queue', () => {
     ];
 
     for (const combo of combinations) {
-      const rows = (await listReviewItems(db, {
+      const rows = (await listReviewItems(db, 1, {
         ...combo,
         threshold: 0.6,
         limit: 100,
@@ -332,7 +332,7 @@ describe('the review queue', () => {
   });
 
   it('reports the net amount, not the list price', async () => {
-    const rows = (await listReviewItems(db, {
+    const rows = (await listReviewItems(db, 1, {
       uncategorized: true,
       lowConfidence: false,
       threshold: 0.6,
@@ -346,7 +346,7 @@ describe('the review queue', () => {
   });
 
   it('still returns the items that do need review', async () => {
-    const rows = await listReviewItems(db, {
+    const rows = await listReviewItems(db, 1, {
       uncategorized: true,
       lowConfidence: false,
       threshold: 0.6,
@@ -375,7 +375,7 @@ describe('the import preview (dry run)', () => {
     );
 
     const before = await count('invoice');
-    const proposals = await categorizePreview(items, { db, kv });
+    const proposals = await categorizePreview(items, { db, kv, accountId: 1 });
     const after = await count('invoice');
 
     expect(after).toBe(before); // no writes
@@ -419,7 +419,7 @@ describe('scale: D1 bound-parameter limits', () => {
       ...Array.from({ length: 250 }, (_, i) => `ZZ${String(10_000_000 + i)}`),
       'EX31020263',
     ];
-    const found = await existingInvoiceNumbers(db, invNums);
+    const found = await existingInvoiceNumbers(db, 1, invNums);
     expect(found.has('EX31020263')).toBe(true);
     expect(found.size).toBe(1);
   });
@@ -428,7 +428,7 @@ describe('scale: D1 bound-parameter limits', () => {
     await importCarrierCsv(CSV, deps(), options);
     const all = await db.prepare(`SELECT id FROM invoice_item`).all<{ id: number }>();
     const ids = [...(all.results ?? []).map((r) => r.id), ...Array.from({ length: 250 }, (_, i) => 900000 + i)];
-    const rows = await getCategorizableItems(db, ids);
+    const rows = await getCategorizableItems(db, 1, ids);
     expect(rows.length).toBeGreaterThan(0);
   });
 });
@@ -460,7 +460,7 @@ describe('per-item selection at import time', () => {
   it('keeps the excluded line out of the spend total', async () => {
     const withAll = await importCarrierCsv(CSV, deps(), options);
     expect(withAll.run.status).toBe('ok');
-    const full = (await totalsForRange(db, '2026-09-01', '2026-09-30'))!.invoice_total;
+    const full = (await totalsForRange(db, 1, '2026-09-01', '2026-09-30'))!.invoice_total;
 
     // Fresh database, same file, one line unticked.
     db.close();
@@ -468,13 +468,13 @@ describe('per-item selection at import time', () => {
     kv = createTestKv();
     let t = 1_800_000_000;
     clock = () => (t += 1);
-    await seedCarrier(db, 1_750_000_000);
+    await seedAccount(db, 1_750_000_000);
     await importCarrierCsv(CSV, deps(), {
       ...options,
       excludeItems: new Set(['EX31020263:1']),
     });
 
-    const trimmed = (await totalsForRange(db, '2026-09-01', '2026-09-30'))!.invoice_total;
+    const trimmed = (await totalsForRange(db, 1, '2026-09-01', '2026-09-30'))!.invoice_total;
     // Row 1 of that invoice nets to 29 after its share of the discount.
     expect(full - trimmed).toBe(29);
   });
