@@ -40,10 +40,72 @@ void start();
 async function start(): Promise<void> {
   setLocale(locale()); // stamps <html lang> from the stored or detected choice
   applyStaticStrings();
+  renderChrome();
+  $('theme-toggle').addEventListener('click', () => toggleTheme());
   const session = await api.session();
   if (!session.authenticated) return showLogin();
   state.username = session.username ?? '';
   await showApp();
+}
+
+// --------------------------------------------------------------- theme
+
+const THEME_KEY = 'invoice-gang.theme';
+
+type Theme = 'light' | 'dark';
+
+/**
+ * The theme on screen: the explicit choice if one has been made, and
+ * otherwise whatever the system asked for. The stylesheet reads the same two
+ * sources in the same order, so this never disagrees with what is painted.
+ */
+function theme(): Theme {
+  const chosen = document.documentElement.dataset.theme;
+  if (chosen === 'dark' || chosen === 'light') return chosen;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/**
+ * Pressing the toggle settles the question: from then on the attribute wins
+ * over the system preference, on this page and on every later one.
+ */
+function toggleTheme(): void {
+  const next: Theme = theme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    // The choice still applies to this page; it just will not survive a reload.
+  }
+  renderChrome();
+}
+
+/**
+ * The two bits of chrome that no `data-i18n` key can fill on its own: the
+ * theme button, which names the theme it would switch *to*, and the
+ * copyright, which carries the current year and a link to the author. Both
+ * are redrawn after every language change for the same reason the views are.
+ *
+ * The copyright goes in as markup rather than text because of that link —
+ * both values interpolated into it are written here, not typed by anyone.
+ */
+function renderChrome(): void {
+  // Declared in here, not beside the other constants: `start()` runs at the
+  // top of this module, before a `const` further down has been initialized.
+  const author = '<a href="https://burrito.rip" target="_blank" rel="noopener noreferrer">Burrito</a>';
+
+  $('theme-label').textContent = theme() === 'dark' ? t('theme.light') : t('theme.dark');
+  $('footer-copyright').innerHTML = t('footer.copyright', {
+    year: new Date().getFullYear(),
+    author,
+  });
+  syncBrandPage();
+}
+
+/** The breadcrumb beside the brand, taken from the tab rather than re-translated. */
+function syncBrandPage(): void {
+  const active = document.querySelector<HTMLButtonElement>('nav button.active');
+  $('brand-page').textContent = active?.textContent ?? '';
 }
 
 /**
@@ -136,6 +198,7 @@ async function showApp(): Promise<void> {
 async function toggleLanguage(): Promise<void> {
   setLocale(locale() === 'zh' ? 'en' : 'zh');
   applyStaticStrings();
+  renderChrome();
   await renderDashboard();
   await renderStaleness();
   if (state.view !== 'dashboard') await renderView(state.view);
@@ -162,6 +225,7 @@ function switchView(view: string): void {
   for (const section of document.querySelectorAll<HTMLElement>('.view')) {
     section.hidden = section.id !== `view-${view}`;
   }
+  syncBrandPage();
   // The invoice list is the one view worth keeping between visits — it pages,
   // and re-fetching would throw away everything already scrolled past.
   if (view === 'invoices' && state.invoices.length > 0) return;
@@ -1039,8 +1103,7 @@ function escape(value: string): string {
 
 function flash(message: string): void {
   const el = document.createElement('div');
-  el.className = 'tag';
-  el.style.cssText = 'position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--surface);padding:.6rem 1rem;z-index:9';
+  el.className = 'toast';
   el.textContent = message;
   document.body.append(el);
   setTimeout(() => el.remove(), 3500);

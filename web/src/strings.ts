@@ -71,6 +71,15 @@ const s = (n: number, one: string, many = `${one}s`): string => (n === 1 ? one :
 const zh: Record<string, Phrase> = {
   'lang.switch': 'EN',
 
+  // The theme button names the theme it would switch *to*, like 'lang.switch'.
+  'theme.dark': '深色',
+  'theme.light': '淺色',
+  'theme.toggle': '切換深淺色',
+
+  'footer.copyright': '© {year} {author} · Invoice Gang',
+  'footer.license': '以 MIT 授權釋出',
+  'footer.privacy': '發票只留在你自己的帳號裡',
+
   'nav.spend': '支出',
   'nav.invoices': '發票',
   'nav.income': '收入',
@@ -103,6 +112,7 @@ const zh: Record<string, Phrase> = {
   'login.registerFailed': '無法建立帳號',
   'login.toRegister': '還沒有帳號？建立一個',
   'login.toSignIn': '已經有帳號了？登入',
+  'login.tagline': '把你的電子發票變成一份說得清楚的帳。',
   'login.registerHint': '帳號名稱 3–32 個字元，限英文小寫、數字與 _ . -；密碼至少 8 個字元。',
 
   'search.placeholder': '搜尋商家與品名…',
@@ -238,6 +248,14 @@ const zh: Record<string, Phrase> = {
 const en: Record<string, Phrase> = {
   'lang.switch': '中文',
 
+  'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'theme.toggle': 'Switch between light and dark',
+
+  'footer.copyright': '© {year} {author} · Invoice Gang',
+  'footer.license': 'Released under the MIT License',
+  'footer.privacy': 'Your invoices stay in your own account',
+
   'nav.spend': 'Spend',
   'nav.invoices': 'Invoices',
   'nav.income': 'Income',
@@ -270,6 +288,7 @@ const en: Record<string, Phrase> = {
   'login.registerFailed': 'could not create the account',
   'login.toRegister': 'No account? Create one',
   'login.toSignIn': 'Already have an account? Sign in',
+  'login.tagline': 'Turn your e-invoice records into an account of where the money went.',
   'login.registerHint':
     'Usernames are 3–32 characters: lowercase letters, digits and _ . -. Passwords need at least 8 characters.',
 

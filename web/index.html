@@ -6,11 +6,26 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Invoice Gang</title>
+    <meta name="description" content="Personal accounting over Taiwan e-invoice records." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon.svg" />
-    <meta name="theme-color" content="#3d85c6" />
+    <meta name="theme-color" content="#1a2a6c" />
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      /*
+        Before the first paint, not in main.ts: the module runs after the page
+        has been drawn, so a stored dark choice would show up as a white flash
+        on every load. Only the saved choice is applied here — with nothing
+        stored the stylesheet follows the system on its own.
+      */
+      try {
+        var saved = localStorage.getItem('invoice-gang.theme');
+        if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
+      } catch (e) {
+        /* Private windows and blocked site data both throw; the default still applies. */
+      }
+    </script>
   </head>
   <body>
     <!--
@@ -22,7 +37,9 @@
     <div id="login" class="login" hidden>
       <!-- Sign-in and sign-up share this form; main.ts swaps the button and endpoint. -->
       <form id="login-form">
+        <div class="login-mark" aria-hidden="true">🧾</div>
         <h1>Invoice Gang</h1>
+        <p class="hint" data-i18n="login.tagline"></p>
         <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" data-i18n-placeholder="login.username" required />
         <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="login.password" required />
         <p id="login-hint" class="hint" data-i18n="login.registerHint" hidden></p>
@@ -33,30 +50,56 @@
     </div>
 
     <div id="app" hidden>
-      <header class="topbar">
-        <h1>Invoice Gang</h1>
-        <nav>
-          <button data-view="dashboard" class="active" data-i18n="nav.spend"></button>
-          <button data-view="invoices" data-i18n="nav.invoices"></button>
-          <button data-view="income" data-i18n="nav.income"></button>
-          <button data-view="review" data-i18n="nav.review"></button>
-          <button data-view="stats" data-i18n="nav.stats"></button>
-        </nav>
-        <div class="range">
-          <input id="from" type="date" />
-          <input id="to" type="date" />
-          <label class="upload" id="csv-label" for="csv" data-i18n="action.importCsv"></label>
-          <input id="csv" type="file" accept=".csv,text/csv" hidden />
-          <!-- Opens the export guide: getting the file out of the portal is the one manual step. -->
-          <button id="csv-help" type="button" class="linky" data-i18n="action.csvHelp"></button>
-          <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
-          <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
-          <!-- The username; opens the account dialog. -->
-          <button id="account" type="button" class="linky" data-i18n-title="nav.account"></button>
-          <!-- Also in the account dialog, but signing out should never need finding. -->
-          <button id="sign-out-top" type="button" data-i18n="action.signOut"></button>
+      <!-- Brand line and view tabs ride together in one sticky bar. -->
+      <div class="app-top">
+        <header class="app-header">
+          <span class="brand-mark" aria-hidden="true">🧾</span>
+          <h1 class="brand">Invoice Gang</h1>
+          <span class="brand-divider" aria-hidden="true">/</span>
+          <!-- The view you are on, filled by main.ts from the active tab. -->
+          <span class="brand-page" id="brand-page"></span>
+
+          <div class="header-actions">
+            <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
+            <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
+            <!-- The username; opens the account dialog. -->
+            <button id="account" type="button" class="linky" data-i18n-title="nav.account"></button>
+            <!-- Also in the account dialog, but signing out should never need finding. -->
+            <button id="sign-out-top" type="button" data-i18n="action.signOut"></button>
+            <!-- Names the theme it would switch to, for the same reason #lang does. -->
+            <button id="theme-toggle" type="button" class="theme-toggle" data-i18n-title="theme.toggle">
+              <span class="theme-toggle-icons" aria-hidden="true">
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <circle cx="12" cy="12" r="4.5" />
+                  <path d="M12 1.5v2M12 20.5v2M22.5 12h-2M3.5 12h-2M19.4 4.6l-1.4 1.4M6 18l-1.4 1.4M19.4 19.4L18 18M6 6L4.6 4.6" />
+                </svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 13.2A9 9 0 1 1 10.8 3a7.2 7.2 0 0 0 10.2 10.2z" />
+                </svg>
+              </span>
+              <span class="theme-toggle-label" id="theme-label"></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="app-bar">
+          <nav class="tabs">
+            <button data-view="dashboard" class="active" data-i18n="nav.spend"></button>
+            <button data-view="invoices" data-i18n="nav.invoices"></button>
+            <button data-view="income" data-i18n="nav.income"></button>
+            <button data-view="review" data-i18n="nav.review"></button>
+            <button data-view="stats" data-i18n="nav.stats"></button>
+          </nav>
+          <div class="range">
+            <input id="from" type="date" />
+            <input id="to" type="date" />
+            <label class="upload" id="csv-label" for="csv" data-i18n="action.importCsv"></label>
+            <input id="csv" type="file" accept=".csv,text/csv" hidden />
+            <!-- Opens the export guide: getting the file out of the portal is the one manual step. -->
+            <button id="csv-help" type="button" class="linky" data-i18n="action.csvHelp"></button>
+          </div>
         </div>
-      </header>
+      </div>
 
       <div id="stale" class="banner" hidden></div>
 
@@ -110,7 +153,9 @@
 
       <dialog id="detail">
         <div id="detail-body"></div>
-        <button id="detail-close" data-i18n="action.close"></button>
+        <div class="preview-actions">
+          <button id="detail-close" data-i18n="action.close"></button>
+        </div>
       </dialog>
 
       <dialog id="preview">
@@ -199,6 +244,20 @@
         </div>
       </dialog>
     </div>
+
+    <!--
+      Outside both screens, so the notice is on the sign-in page too — that is
+      where someone decides whether to hand this thing their purchase history.
+      The year in the copyright is filled by main.ts.
+    -->
+    <footer class="app-footer">
+      <span class="footer-mark" aria-hidden="true">🧾</span>
+      <span class="footer-copyright" id="footer-copyright"></span>
+      <span class="dot" aria-hidden="true">·</span>
+      <span data-i18n="footer.license"></span>
+      <span class="dot" aria-hidden="true">·</span>
+      <span data-i18n="footer.privacy"></span>
+    </footer>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
