@@ -8,6 +8,9 @@
  *
  * They live on the dashboard rather than only in the README because the claim
  * "the LLM is almost never called" is worth nothing without the counter.
+ *
+ * Everything here is the signed-in account's own, except the size of the
+ * classifier cache, which is shared.
  */
 import { classifierStats, getSyncState, listSyncRuns, topUnruledMerchants } from '../db/queries.js';
 import { CLASSIFIER_MODEL } from '../categorize/llm.js';
@@ -26,9 +29,13 @@ const TOKENS_PROMPT_OVERHEAD = 400;
 const TOKENS_PER_ITEM_IN = 30;
 const TOKENS_PER_ITEM_OUT = 25;
 
-export async function handleStats(db: D1Database, carrierId: number): Promise<Response> {
-  const stats = await classifierStats(db);
-  const runs = await listSyncRuns(db, 5);
+export async function handleStats(
+  db: D1Database,
+  accountId: number,
+  carrierId: number,
+): Promise<Response> {
+  const stats = await classifierStats(db, accountId);
+  const runs = await listSyncRuns(db, accountId, 5);
   const state = await getSyncState(db, carrierId);
 
   const cacheHits = stats.totals?.cache_hits ?? 0;
@@ -77,6 +84,6 @@ export async function handleStats(db: D1Database, carrierId: number): Promise<Re
     },
     // The maintenance loop: the merchants still costing model calls are the
     // ones worth writing a rule for.
-    rule_candidates: await topUnruledMerchants(db, 20),
+    rule_candidates: await topUnruledMerchants(db, accountId, 20),
   });
 }

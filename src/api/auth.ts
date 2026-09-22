@@ -1,19 +1,16 @@
 /**
- * Owner auth. One user, no user table.
+ * Passwords and sessions — the cryptography under accounts.
  *
- * `POST /api/login` compares a password against `OWNER_PASSWORD_HASH` and sets
- * an HttpOnly, Secure, SameSite=Strict cookie carrying an HMAC-signed expiry.
- * Every other route verifies it.
+ * Sign-up and sign-in themselves are in `account.ts`. A session is an
+ * HttpOnly, SameSite=Strict cookie carrying an account id and an expiry,
+ * HMAC-signed with `SESSION_SECRET`. There is still no session table:
+ * verifying a cookie costs no database read, and rotating the secret signs
+ * every account out, which remains the recovery path.
  *
- * There is no registration, no password reset and no session table: for one
- * user those are liabilities, not features. Rotating `SESSION_SECRET` logs you
- * out, which is the intended recovery path.
- *
- * The hash is PBKDF2-SHA256 rather than the argon2/scrypt named in the spec —
- * Workers ship WebCrypto and neither of those, and pulling in a WASM hasher
- * to protect a single self-chosen password is the worse trade. Format:
- * `pbkdf2$<iterations>$<salt b64>$<hash b64>`; `npm run hash-password` prints
- * one.
+ * The hash is PBKDF2-SHA256 rather than argon2 or scrypt — Workers ship
+ * WebCrypto and neither of those, and a WASM hasher is more to trust and to
+ * ship than the problem needs. Format: `pbkdf2$<iterations>$<salt b64>$<hash
+ * b64>`, which is what the `account.password_hash` column holds.
  *
  * **The Workers runtime rejects PBKDF2 above 100,000 iterations.** Node has no
  * such limit, so a hash generated with more verifies fine locally and throws
@@ -43,8 +40,8 @@ export async function verifyPassword(password: string, stored: string): Promise<
     throw new ApiError(
       500,
       'bad_password_hash',
-      `OWNER_PASSWORD_HASH uses ${iterations} iterations; this runtime supports at most ` +
-        `${MAX_PBKDF2_ITERATIONS}. Regenerate it with "npm run hash-password" and set it again.`,
+      `a stored password hash uses ${iterations} iterations; this runtime supports at most ` +
+        `${MAX_PBKDF2_ITERATIONS}. Regenerate it with "npm run hash-password" and store it again.`,
     );
   }
 
@@ -87,29 +84,37 @@ async function pbkdf2(password: string, salt: Uint8Array, iterations: number): P
 
 // ---------------------------------------------------------------- sessions
 
-/** `<expiry unix seconds>.<hex HMAC of that string>`. No state on the server. */
-export async function createSession(secret: string, now: Unix): Promise<string> {
-  const expiry = String(now + SESSION_SECONDS);
-  return `${expiry}.${await sign(secret, expiry)}`;
+/** `<account id>.<expiry unix seconds>.<hex HMAC of the first two>`. No server state. */
+export async function createSession(secret: string, accountId: number, now: Unix): Promise<string> {
+  const payload = `${accountId}.${now + SESSION_SECONDS}`;
+  return `${payload}.${await sign(secret, payload)}`;
 }
 
+/**
+ * The account a token was issued to, or `null`. The signature covers the id
+ * and the expiry together, so neither can be edited — and editing the id is
+ * the first thing anyone with a valid cookie of their own would try. A token
+ * from the single-user build has no id and is simply refused.
+ */
 export async function verifySession(
   secret: string,
   token: string | null,
   now: Unix,
-): Promise<boolean> {
-  if (!token) return false;
-  const dot = token.lastIndexOf('.');
-  if (dot < 1) return false;
-  const expiry = token.slice(0, dot);
-  const signature = token.slice(dot + 1);
+): Promise<number | null> {
+  if (!token) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [id = '', expiry = '', signature = ''] = parts;
+  if (!/^\d{1,15}$/.test(id) || !/^\d{1,15}$/.test(expiry)) return null;
 
-  const expected = await sign(secret, expiry);
+  const expected = await sign(secret, `${id}.${expiry}`);
   if (!timingSafeEqual(new TextEncoder().encode(signature), new TextEncoder().encode(expected))) {
-    return false;
+    return null;
   }
-  const expiresAt = Number(expiry);
-  return Number.isFinite(expiresAt) && expiresAt > now;
+  if (Number(expiry) <= now) return null;
+
+  const accountId = Number(id);
+  return accountId > 0 ? accountId : null;
 }
 
 async function sign(secret: string, payload: string): Promise<string> {
@@ -150,10 +155,23 @@ export function readSessionCookie(request: Request): string | null {
   return null;
 }
 
-/** Throws 401 unless the request carries a valid session. */
-export async function requireOwner(request: Request, env: Env, now: Unix): Promise<void> {
-  const ok = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
-  if (!ok) throw new ApiError(401, 'unauthorized', 'sign in first');
+/** The signed-in account's id. Throws 401 unless the request carries a valid session. */
+export async function requireAccount(request: Request, env: Env, now: Unix): Promise<number> {
+  const accountId = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
+  if (accountId === null) throw new ApiError(401, 'unauthorized', 'sign in first');
+  return accountId;
+}
+
+// ------------------------------------------------------------------ tokens
+
+/** 256 random bits as hex — import tokens, and the decoy password in `account.ts`. */
+export function randomToken(): string {
+  return toHex(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return toHex(new Uint8Array(digest));
 }
 
 // ----------------------------------------------------------------- encoding

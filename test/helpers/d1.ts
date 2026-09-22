@@ -36,7 +36,7 @@ type Bindable = null | number | bigint | string | Uint8Array;
  * the header upsert and the item insert report what they actually created.
  */
 function producesRows(sql: string): boolean {
-  return /^\s*(select|with)\b/i.test(sql) || /\breturning\b/i.test(sql);
+  return /^\s*(select|with|pragma)\b/i.test(sql) || /\breturning\b/i.test(sql);
 }
 
 class FakeStatement {
@@ -95,11 +95,14 @@ class FakeStatement {
   }
 }
 
-/** An in-memory database with the real schema applied. */
-export function createTestDb(): D1Database & { close(): void } {
+/**
+ * An in-memory database with the real schema applied — or, for the migration
+ * test, whatever older schema it is handed.
+ */
+export function createTestDb(schemaSql = readFileSync(SCHEMA_PATH, 'utf8')): D1Database & { close(): void } {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys = ON');
-  sqlite.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+  sqlite.exec(schemaSql);
 
   const api = {
     prepare(sql: string) {
@@ -157,16 +160,27 @@ export function createTestKv(): KVNamespace & { store: Map<string, string> } {
   return kv as unknown as KVNamespace & { store: Map<string, string> };
 }
 
-/** Seeds the single carrier the sync is written against. */
-export async function seedCarrier(
+/**
+ * Seeds an account and its carrier, with no password — the shape an account
+ * has in every test that is not about signing in. The carrier gets the same
+ * id as the account, which keeps `{ accountId: 2, carrierId: 2 }` readable.
+ */
+export async function seedAccount(
   db: D1Database,
   createdAt: number,
-  cardNo = '/TEST123',
-): Promise<void> {
+  id = 1,
+  username = `user${id}`,
+): Promise<number> {
+  await db
+    .prepare(`INSERT INTO account (id, username, password_hash, created_at) VALUES (?, ?, NULL, ?)`)
+    .bind(id, username, createdAt)
+    .run();
   await db
     .prepare(
-      `INSERT INTO carrier (id, card_type, card_no, label, created_at) VALUES (1, ?, ?, ?, ?)`,
+      `INSERT INTO carrier (id, account_id, card_type, card_no, label, created_at)
+       VALUES (?, ?, '3J0002', 'default', 'test', ?)`,
     )
-    .bind('3J0002', cardNo, 'test', createdAt)
+    .bind(id, id, createdAt)
     .run();
+  return id;
 }

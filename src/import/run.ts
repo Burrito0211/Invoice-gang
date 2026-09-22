@@ -7,11 +7,15 @@
  *
  *   - **Idempotent.** Exports overlap — you download the last few months every
  *     time — so re-importing the same invoice must not duplicate it. Enforced
- *     structurally by `invoice.inv_num` and `UNIQUE (inv_num, row_num)`, not
- *     by checking before inserting.
+ *     structurally by `PRIMARY KEY (account_id, inv_num)` and
+ *     `UNIQUE (account_id, inv_num, row_num)`, not by checking before
+ *     inserting.
  *   - **Monotone.** An import never deletes or blanks an existing invoice. It
  *     updates the header fields the export is authoritative for and adds
  *     items; nothing is removed.
+ *
+ * Both hold per account. An import writes only into the account it was given,
+ * so the same export imported by two people is two independent copies.
  *
  * Resumability, boundedness and quota-safety were properties of a paginated,
  * rate-limited API. There is no quota on reading a local file and no cursor to
@@ -47,6 +51,9 @@ export interface ImportDeps {
 }
 
 export interface ImportOptions {
+  /** Whose invoices these are. Every row the run writes carries it. */
+  accountId: number;
+  /** That account's carrier. */
   carrierId: number;
   trigger: SyncTrigger;
   /** Items left uncategorized by a previous run, retried alongside the new ones. */
@@ -84,7 +91,7 @@ export async function importCarrierCsv(
   options: ImportOptions,
 ): Promise<ImportResult> {
   const startedAt = deps.now();
-  const runId = await startSyncRun(deps.db, options.trigger, startedAt);
+  const runId = await startSyncRun(deps.db, options.accountId, options.trigger, startedAt);
 
   let status: SyncRunRow['status'] = 'ok';
   let error: string | null = null;
@@ -115,7 +122,7 @@ export async function importCarrierCsv(
     windowStart = dates[0] ?? null;
     windowEnd = dates[dates.length - 1] ?? null;
 
-    const newItemIds = await persist(chosen, deps, options.carrierId, options.excludeItems);
+    const newItemIds = await persist(chosen, deps, options);
     headersNew = newItemIds.headersNew;
     itemsNew = newItemIds.ids.length;
 
@@ -124,8 +131,12 @@ export async function importCarrierCsv(
     // window to re-scan — a later export simply contains the late invoice.
     if (windowEnd) await setWatermark(deps.db, options.carrierId, windowEnd, deps.now());
 
-    const fresh = await getCategorizableItems(deps.db, newItemIds.ids);
-    const retries = await selectUncategorizedItems(deps.db, options.retryLimit ?? 500);
+    const fresh = await getCategorizableItems(deps.db, options.accountId, newItemIds.ids);
+    const retries = await selectUncategorizedItems(
+      deps.db,
+      options.accountId,
+      options.retryLimit ?? 500,
+    );
     const seen = new Set(fresh.map((i) => i.id));
     const batch = [...fresh, ...retries.filter((r) => !seen.has(r.id))];
 
@@ -137,7 +148,7 @@ export async function importCarrierCsv(
         sellerBan: row.seller_ban,
         sellerName: row.seller_name,
       })),
-      { db: deps.db, kv: deps.kv, now: deps.now, llm: deps.llm },
+      { db: deps.db, kv: deps.kv, now: deps.now, llm: deps.llm, accountId: options.accountId },
     );
 
     if (categorize.llmError) status = 'partial';
@@ -178,9 +189,9 @@ export async function importCarrierCsv(
 async function persist(
   invoices: ParsedInvoice[],
   deps: ImportDeps,
-  carrierId: number,
-  excludeItems?: Set<string>,
+  options: ImportOptions,
 ): Promise<{ headersNew: number; ids: number[] }> {
+  const { accountId, carrierId, excludeItems } = options;
   let headersNew = 0;
   const ids: number[] = [];
 
@@ -194,7 +205,7 @@ async function persist(
     };
 
     const headerResult = await deps.db.batch<{ first_seen_at: Unix }>([
-      upsertInvoiceHeaderStatement(deps.db, carrierId, header, now),
+      upsertInvoiceHeaderStatement(deps.db, accountId, carrierId, header, now),
     ]);
     headersNew += countNewHeaders(headerResult, now);
 
@@ -209,6 +220,7 @@ async function persist(
         invoice.items.map((item, index) =>
           insertItemStatement(
             deps.db,
+            accountId,
             header.invNum,
             item,
             itemKey(item.description),
@@ -223,14 +235,14 @@ async function persist(
       // otherwise keep a stale allocation. Refresh it explicitly.
       await deps.db.batch(
         invoice.items.map((item, index) =>
-          updateNetAmountStatement(deps.db, header.invNum, item.rowNum, net[index]!),
+          updateNetAmountStatement(deps.db, accountId, header.invNum, item.rowNum, net[index]!),
         ),
       );
     }
 
     // The items are present by definition here, so the invoice is never left
     // sitting in the detail queue the old API sync used.
-    await markDetailFetched(deps.db, header.invNum, deps.now());
+    await markDetailFetched(deps.db, accountId, header.invNum, deps.now());
   }
 
   return { headersNew, ids };

@@ -38,7 +38,46 @@ log in, click export ─▶ Downloads/
                                                    dashboard
 ```
 
-Your part is two clicks. Everything after the file lands is automatic.
+Everything after the file lands is automatic. Your part is not two clicks —
+that claim was made before anyone had walked the portal. It is the sequence in
+*Getting the file out* below, and it takes about ninety seconds.
+
+### How often
+
+Twice a week, not monthly.
+
+Invoices are not queryable the moment they are issued: by 加值型及非加值型營業稅法
+§32-1 a merchant has until two days after issuing one to file it with the
+platform. That two-day floor is in the data source itself and no design gets
+under it — the old API would not have either.
+
+What that settles is the cadence. Exporting twice a week keeps the data two to
+four days old, which is within about a day of the best achievable, and it is
+the freshness the budget card assumes. `STALE_AFTER_DAYS` is 5 to match: one
+missed export, not one missed month.
+
+### Getting the file out
+
+At 手機條碼專區 → 發票查詢及捐贈, with the date range set and 查詢 pressed:
+
+1. Set 顯示 to **100 筆**. The default is 10, and the selection does not
+   survive paging.
+2. Tick the select-all in the **rightmost** column — the unlabelled one after
+   買方統編.
+3. Press **下載CSV檔**.
+
+> **The left-hand checkbox column is not the download column.** It is
+> `全選`, and it feeds the **捐贈** button at the top of the table. The right-hand
+> one is `invoiceDetailAll`, and that is what 下載CSV檔 reads. Ticking the left
+> column and pressing the wrong button donates the invoices, which cannot be
+> undone and forfeits the prize claim. On a phone the two columns sit at
+> opposite edges of a seven-column table, so this is worth slowing down for.
+
+One more constraint: **每次查詢區間須為同1個月** — a single query cannot span two
+calendar months. It limits the range of one query, not how often you run one,
+so a twice-weekly export of the current month-to-date is exactly what the form
+already defaults to. History reaches back four 期 in even months and five in
+odd (a 期 is two months), so backfilling means one query per month.
 
 ### Why not automate the login too
 
@@ -73,7 +112,7 @@ it equals `消費明細_金額` on every single row. Taking it at face value sto
 whichever line happened to land last — for one four-line invoice that would
 have been −15 instead of 83. The total is summed from the lines.
 
-**There is no row number.** `UNIQUE (inv_num, row_num)` is the idempotency key,
+**There is no row number.** `UNIQUE (account_id, inv_num, row_num)` is the idempotency key,
 so the row number comes from position within the invoice. This is forced, not
 chosen: a real export already contained an invoice with two lines identical in
 name, quantity *and* amount, so any content-derived key would silently merge
@@ -86,7 +125,7 @@ negative amounts and are what make a total add up. They are imported as items.
 
 The export's own footer says 「捐贈或作廢之發票，字軌號碼均會隱末3碼」 — voided
 and donated invoices arrive with the last three digits of the number masked.
-`inv_num` is the primary key, so these are imported with a marker appended to
+`inv_num` is part of the primary key, so these are imported with a marker appended to
 `inv_status` and reported in the import response, rather than dropped. A
 donated invoice is still real spending; losing it silently would put a hole in
 the totals that nothing would ever surface.
@@ -97,7 +136,9 @@ Two of the five in `SYNC.md` survive, and they matter more than before:
 
 1. **Idempotent.** Exports overlap by design — you download the last few months
    every time — so re-importing must not duplicate. Enforced structurally by
-   `invoice.inv_num` and `UNIQUE (inv_num, row_num)`.
+   `PRIMARY KEY (account_id, inv_num)` and `UNIQUE (account_id, inv_num, row_num)`.
+   Both hold per account: the same export imported by two people is two
+   independent copies.
 2. **Monotone.** An import never deletes or blanks an existing invoice. Header
    fields update; items are only added.
 
@@ -108,17 +149,16 @@ asserting properties of a system that no longer exists.
 
 ## Setup
 
-```bash
-# A long random string; the watch folder authenticates with it.
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-npx wrangler secret put IMPORT_TOKEN
-```
+In the dashboard, open the account menu (your username, top right) and press
+**Create import token**. It is shown once — copy it then, because the database
+keeps only a hash. Replacing it revokes the old one. Everything uploaded with
+it lands in your account, whichever machine runs the script.
 
 Then set the environment for the watcher and run it:
 
 ```
 INVOICE_GANG_URL=https://invoice-gang.<subdomain>.workers.dev
-INVOICE_GANG_TOKEN=<the same value>
+INVOICE_GANG_TOKEN=<the token from the account menu>
 INVOICE_GANG_WATCH=C:\Users\you\Downloads        # optional
 ```
 
@@ -165,5 +205,7 @@ This is the honest version of "runs without me": it remembers so you do not
 have to. Without it the failure mode of a manual-import system is silence —
 you stop importing, nothing errors, and the chart quietly stops moving.
 
-Set `NOTIFY_WEBHOOK` to any URL accepting a plain-text POST (ntfy, Discord,
-Slack) to get the nudge somewhere you will see it. Unset means log only.
+Set a notification URL in the account menu — any https URL accepting a
+plain-text POST (ntfy, Discord, Slack) — to get the nudge, and prize wins,
+somewhere you will see them. Each account's messages go only to its own URL;
+an account without one gets the dashboard banner only.

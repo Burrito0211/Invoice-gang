@@ -12,9 +12,14 @@
  *   INSERT INTO winning_number (inv_period, prize_class, number, fetched_at)
  *   VALUES ('11510', 'special', '12345678', unixepoch());
  *
- * Six rows, six times a year. `prizes/match.ts` does the rest, and a hit is
+ * Six rows, six times a year. `prizes/match.ts` does the rest.
+ *
+ * The numbers are shared; the invoices are every account's, read together
+ * because the draw is the same for all of them; and each hit is recorded
+ * against its own account and sent only to that account's webhook. A hit is
  * notified once — `notified_at` is stamped after the send, so a re-run cannot
- * notify twice.
+ * notify twice — and an account with no webhook keeps its hits unsent, so
+ * setting one later still delivers them.
  */
 import {
   getWinningNumbers,
@@ -39,8 +44,8 @@ export interface PrizeCheckResult {
 export interface PrizeDeps {
   db: D1Database;
   now: () => Unix;
-  /** Absent when no notification channel is configured. */
-  notify?: (message: string) => Promise<void>;
+  /** Sends one message to one account's webhook. Absent means record hits, send nothing. */
+  notify?: (webhook: string, message: string) => Promise<void>;
 }
 
 export async function checkPrizes(
@@ -68,16 +73,17 @@ export async function checkPrizes(
   const invoices = await listInvoiceNumbersForPeriod(deps.db, period, periodRange(period));
   result.invoicesChecked = invoices.length;
 
-  const hits: { invNum: string; match: PrizeMatch }[] = [];
+  const hits: { accountId: number; invNum: string; match: PrizeMatch }[] = [];
   for (const invoice of invoices) {
     const match = matchInvoice(invoice.inv_num, numbers);
-    if (match) hits.push({ invNum: invoice.inv_num, match });
+    if (match) hits.push({ accountId: invoice.account_id, invNum: invoice.inv_num, match });
   }
 
   if (hits.length > 0) {
     await deps.db.batch(
       hits.map((h) =>
         insertPrizeHitStatement(deps.db, {
+          accountId: h.accountId,
           invNum: h.invNum,
           invPeriod: period,
           prizeClass: h.match.prizeClass,
@@ -92,10 +98,11 @@ export async function checkPrizes(
   if (deps.notify) {
     for (const hit of await listUnnotifiedPrizeHits(deps.db)) {
       await deps.notify(
+        hit.notify_webhook,
         `發票中獎 — ${hit.inv_num} (${hit.seller_name ?? 'unknown merchant'}, ${hit.inv_date}) ` +
           `won NT$${hit.amount.toLocaleString('en-US')} [${hit.prize_class}]`,
       );
-      await markPrizeNotified(deps.db, hit.inv_num, deps.now());
+      await markPrizeNotified(deps.db, hit.account_id, hit.inv_num, deps.now());
       result.notified += 1;
     }
   }

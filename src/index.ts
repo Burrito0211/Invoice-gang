@@ -4,35 +4,41 @@
  *   `scheduled()` — the cron trigger. It no longer fetches anything, because
  *                   there is nothing left to fetch: the MOF closed its API to
  *                   individuals and the export portal sits behind bot
- *                   management. What it does instead is watch for staleness
- *                   and say so, which is the honest version of "runs without
- *                   me" — it remembers so you do not have to.
+ *                   management. What it does instead is watch each account
+ *                   that asked to be nudged for staleness and say so, which is
+ *                   the honest version of "runs without me" — it remembers so
+ *                   you do not have to.
  *   `fetch()`     — `/api/*` plus the static dashboard.
  *
  * Invoice data arrives through `POST /api/import`, from the dashboard's
  * upload or from the local watch-folder script. See docs/IMPORT.md.
+ *
+ * Every route past sign-in resolves the caller to an account id before
+ * anything else happens, and hands that id to its handler, which hands it to
+ * every query. There is no route that reads personal data without one.
  */
 import { checkPrizes } from './prizes/check.js';
-import {
-  getCarrierByCardNo,
-  getSyncState,
-  insertCarrier,
-  listSyncRuns,
-} from './db/queries.js';
+import { getAccountById, getCarrierForAccount, listNotifiableAccounts } from './db/queries.js';
 import { CLASSIFIER_MODEL } from './categorize/llm.js';
-import { carrierKey, loadConfig, requireAuthSecrets } from './lib/config.js';
-import { isIsoDate, isoToUnix, toIsoDate } from './lib/dates.js';
+import { loadConfig, requireAuthSecrets } from './lib/config.js';
+import { toIsoDate } from './lib/dates.js';
 import type { ClassifyOptions } from './categorize/llm.js';
+import { clearCookie, readSessionCookie, requireAccount, verifySession } from './api/auth.js';
 import {
-  clearCookie,
-  createSession,
-  readSessionCookie,
-  requireOwner,
-  sessionCookie,
-  verifyPassword,
-  verifySession,
-} from './api/auth.js';
-import { handleImport, handleImportPreview, hasImportToken } from './api/import.js';
+  accountFromImportToken,
+  handleAccount,
+  handleCreateImportToken,
+  handleDeleteImportToken,
+  handleLogin,
+  handleRegister,
+  handleUpdateAccount,
+} from './api/account.js';
+import {
+  handleDeleteBudget,
+  handleGetBudget,
+  handleSetBudget,
+} from './api/budget.js';
+import { handleImport, handleImportPreview } from './api/import.js';
 import {
   handleCreateIncome,
   handleDeleteIncome,
@@ -44,7 +50,6 @@ import {
   handleDeleteOverride,
   handleListCategories,
   handleListOverrides,
-  readBody,
 } from './api/categorize.js';
 import { handleInvoiceDetail, handleInvoiceList } from './api/invoices.js';
 import { handleItems } from './api/items.js';
@@ -55,8 +60,15 @@ import { handleImportStatus } from './api/status.js';
 import { ApiError, errorResponse, json } from './api/respond.js';
 import type { Env } from './types.js';
 
-/** Data older than this is stale enough to be worth a nudge. */
-const STALE_AFTER_DAYS = 10;
+/**
+ * Data older than this is stale enough to be worth a nudge.
+ *
+ * Five days, not ten. Ten was tuned for a dashboard you glance at; a budget
+ * is something you make a decision against, and a decision made on ten-day-old
+ * spending is made on the wrong number. Twice-weekly exports keep the data
+ * two to four days old, so five days means exactly one missed export.
+ */
+const STALE_AFTER_DAYS = 5;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -86,19 +98,19 @@ async function route(
   const now = unixNow();
   const today = toIsoDate(now);
   const path = url.pathname;
+  const secure = url.protocol === 'https:';
 
   // ------------------------------------------------------------------ auth
+  // Sign-up is open: anyone who reaches the site can make an account. What
+  // keeps that safe is that an account can only ever reach its own rows.
+  if (path === '/api/register' && request.method === 'POST') {
+    requireAuthSecrets(env);
+    return handleRegister(request, env, secure, now);
+  }
+
   if (path === '/api/login' && request.method === 'POST') {
     requireAuthSecrets(env);
-    const body = (await readBody(request)) as { password?: unknown };
-    const password = typeof body.password === 'string' ? body.password : '';
-    if (!(await verifyPassword(password, env.OWNER_PASSWORD_HASH))) {
-      throw new ApiError(401, 'bad_credentials', 'wrong password');
-    }
-    const token = await createSession(env.SESSION_SECRET, now);
-    return json({ ok: true }, 200, {
-      'set-cookie': sessionCookie(token, url.protocol === 'https:'),
-    });
+    return handleLogin(request, env, secure, now);
   }
 
   if (path === '/api/logout' && request.method === 'POST') {
@@ -106,68 +118,98 @@ async function route(
   }
 
   if (path === '/api/session' && request.method === 'GET') {
-    const ok = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
-    return json({ authenticated: ok });
+    const accountId = await verifySession(env.SESSION_SECRET, readSessionCookie(request), now);
+    const account = accountId === null ? null : await getAccountById(env.DB, accountId);
+    return json(
+      account ? { authenticated: true, username: account.username } : { authenticated: false },
+    );
   }
 
-  // The preview is a dry run — it writes nothing — so it is owner-only and
-  // never opens to the bearer token, which exists purely for the headless
+  // The preview is a dry run — it writes nothing — so it is session-only and
+  // never opens to an import token, which exists purely for the headless
   // upload path that has no screen to preview onto.
   if (path === '/api/import/preview' && request.method === 'POST') {
-    await requireOwner(request, env, now);
-    return handleImportPreview(request, env);
+    const accountId = await requireAccount(request, env, now);
+    return handleImportPreview(request, env, accountId);
   }
 
   // Import is the one route a machine can authenticate to: the watch-folder
-  // script carries a bearer token rather than a session cookie. It still
-  // falls back to the owner session, which is how a file dragged into the
+  // script carries its account's import token rather than a session cookie.
+  // It still falls back to the session, which is how a file dragged into the
   // dashboard arrives.
   if (path === '/api/import' && request.method === 'POST') {
-    if (!hasImportToken(request, env)) await requireOwner(request, env, now);
-    await ensureCarrier(env, now);
+    const accountId =
+      (await accountFromImportToken(request, env.DB, now)) ??
+      (await requireAccount(request, env, now));
     // A real advancing clock, not the request's fixed `now`: newness is
     // inferred from `first_seen_at == now`, and a frozen clock would make
     // every re-imported row look new.
-    return handleImport(request, env, { now: unixNow, llm: buildLlm(env) }, now);
+    return handleImport(request, env, accountId, { now: unixNow, llm: buildLlm(env) }, now);
   }
 
-  // Everything past this point is the owner's.
-  await requireOwner(request, env, now);
+  // Everything past this point belongs to the signed-in account.
+  const accountId = await requireAccount(request, env, now);
+
+  // --------------------------------------------------------------- account
+  if (path === '/api/account') {
+    if (request.method === 'GET') return handleAccount(env.DB, accountId);
+    if (request.method === 'PUT') return handleUpdateAccount(env.DB, accountId, request);
+  }
+  if (path === '/api/account/import-token') {
+    if (request.method === 'POST') return handleCreateImportToken(env.DB, accountId, now);
+    if (request.method === 'DELETE') return handleDeleteImportToken(env.DB, accountId);
+  }
 
   // ------------------------------------------------------------------ read
-  if (path === '/api/summary') return handleSummary(env.DB, url, today);
-  if (path === '/api/invoices') return handleInvoiceList(env.DB, url);
+  if (path === '/api/summary') return handleSummary(env.DB, accountId, url, today);
+  if (path === '/api/invoices') return handleInvoiceList(env.DB, accountId, url);
   if (path.startsWith('/api/invoices/')) {
-    return handleInvoiceDetail(env.DB, decodeURIComponent(path.slice('/api/invoices/'.length)));
+    return handleInvoiceDetail(
+      env.DB,
+      accountId,
+      decodeURIComponent(path.slice('/api/invoices/'.length)),
+    );
   }
-  if (path === '/api/items') return handleItems(env.DB, url);
+  if (path === '/api/items') return handleItems(env.DB, accountId, url);
   if (path === '/api/categories') return handleListCategories(env.DB);
-  if (path === '/api/overrides') return handleListOverrides(env.DB);
-  if (path === '/api/prizes') return handlePrizes(env.DB, url, today);
+  if (path === '/api/overrides') return handleListOverrides(env.DB, accountId);
+  if (path === '/api/prizes') return handlePrizes(env.DB, accountId, url, today);
+
+  // The budget is monthly, so it is addressed by month rather than by the
+  // dashboard's arbitrary from/to range. GET and PUT share a path because
+  // they describe the same thing, and both answer with the full pacing view
+  // so setting a figure immediately shows what it implies.
+  if (path === '/api/budget') {
+    if (request.method === 'GET') return handleGetBudget(env.DB, accountId, url, today);
+    if (request.method === 'PUT') {
+      return handleSetBudget(env.DB, accountId, request, url, today, now);
+    }
+    if (request.method === 'DELETE') return handleDeleteBudget(env.DB, accountId, url, today);
+  }
 
   if (path === '/api/income') {
-    if (request.method === 'GET') return handleListIncome(env.DB, url, today);
-    if (request.method === 'POST') return handleCreateIncome(env.DB, request, now);
+    if (request.method === 'GET') return handleListIncome(env.DB, accountId, url, today);
+    if (request.method === 'POST') return handleCreateIncome(env.DB, accountId, request, now);
   }
   if (path.startsWith('/api/income/') && request.method === 'DELETE') {
-    return handleDeleteIncome(env.DB, path.slice('/api/income/'.length));
+    return handleDeleteIncome(env.DB, accountId, path.slice('/api/income/'.length));
   }
   if (path === '/api/items/exclude' && request.method === 'POST') {
-    return handleItemExclude(env.DB, request);
+    return handleItemExclude(env.DB, accountId, request);
   }
 
   if (path === '/api/stats' || path === '/api/import/status') {
-    const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));
+    const carrier = await getCarrierForAccount(env.DB, accountId);
     const carrierId = carrier?.id ?? 0;
     return path === '/api/stats'
-      ? handleStats(env.DB, carrierId)
-      : handleImportStatus(env.DB, carrierId, now, STALE_AFTER_DAYS);
+      ? handleStats(env.DB, accountId, carrierId)
+      : handleImportStatus(env.DB, accountId, carrierId, now, STALE_AFTER_DAYS);
   }
 
   // ----------------------------------------------------------------- write
   if (path === '/api/categorize') {
-    if (request.method === 'POST') return handleCreateOverride(env.DB, env.CACHE, request, now);
-    if (request.method === 'DELETE') return handleDeleteOverride(env.DB, env.CACHE, request);
+    if (request.method === 'POST') return handleCreateOverride(env.DB, accountId, request, now);
+    if (request.method === 'DELETE') return handleDeleteOverride(env.DB, accountId, request);
   }
 
   throw new ApiError(404, 'not_found', `no route for ${request.method} ${path}`);
@@ -177,48 +219,36 @@ async function route(
 
 /**
  * The watchdog. There is no data source to poll, so the job checks how old
- * the data is and notifies when it has gone stale, then re-checks prizes in
- * case winning numbers were recorded since the last run.
+ * each account's data is and nudges the ones that have gone stale, then
+ * re-checks prizes in case winning numbers were recorded since the last run.
  *
  * Without this, the failure mode of a manual-import system is silence: you
- * simply stop importing and never notice the chart stopped moving.
+ * simply stop importing and never notice the chart stopped moving. An account
+ * without a webhook still gets the dashboard banner.
  */
 async function cronRun(env: Env): Promise<void> {
   const now = unixNow();
-  const carrier = await getCarrierByCardNo(env.DB, carrierKey(env));
-  if (!carrier) {
-    console.warn('no carrier row yet — import once to create it');
-    return;
-  }
+  const accounts = await listNotifiableAccounts(env.DB);
 
-  const state = await getSyncState(env.DB, carrier.id);
-  const lastSuccess = state?.last_success_at ?? null;
-  const ageDays =
-    lastSuccess === null ? Infinity : Math.floor((now - lastSuccess) / 86400);
+  let nudged = 0;
+  for (const account of accounts) {
+    const lastSuccess = account.last_success_at;
+    const ageDays = lastSuccess === null ? Infinity : Math.floor((now - lastSuccess) / 86400);
+    if (ageDays < STALE_AFTER_DAYS) continue;
 
-  if (ageDays >= STALE_AFTER_DAYS) {
     await notify(
-      env,
+      account.notify_webhook,
       lastSuccess === null
-        ? 'Invoice Gang has never imported anything — export your carrier CSV and upload it.'
-        : `Invoice data is ${ageDays} days old. Export a fresh carrier CSV and upload it.`,
+        ? 'Invoice Gang has never imported anything for you — export your carrier CSV and upload it.'
+        : `Your invoice data is ${ageDays} days old. Export a fresh carrier CSV and upload it.`,
     );
+    nudged += 1;
   }
-
-  const runs = await listSyncRuns(env.DB, 1);
-  console.log('staleness check', {
-    synced_through: state?.synced_through ?? null,
-    age_days: ageDays === Infinity ? null : ageDays,
-    last_run_status: runs[0]?.status ?? null,
-  });
+  console.log('staleness check', { accounts_with_webhook: accounts.length, nudged });
 
   // Cheap, and it costs nothing when no numbers have been recorded.
   try {
-    const prizes = await checkPrizes({
-      db: env.DB,
-      now: unixNow,
-      notify: (message) => notify(env, message),
-    });
+    const prizes = await checkPrizes({ db: env.DB, now: unixNow, notify });
     if (prizes.hits > 0) console.log(`prize check ${prizes.invPeriod}: ${prizes.hits} hit(s)`);
   } catch (err) {
     // A prize check failing must never take the staleness check with it.
@@ -227,15 +257,13 @@ async function cronRun(env: Env): Promise<void> {
 }
 
 /**
- * Notification is a webhook so the channel is the owner's choice — ntfy,
- * Discord, Slack, whatever accepts a POST. Unset means log only, which is
- * still visible in `wrangler tail`.
+ * A plain-text POST to the webhook an account set — ntfy, Discord, Slack,
+ * whatever accepts one. Each message goes only to the account it is about,
+ * and is not logged: it names that account's invoices.
  */
-async function notify(env: Env, message: string): Promise<void> {
-  console.log(message);
-  if (!env.NOTIFY_WEBHOOK) return;
+async function notify(webhook: string, message: string): Promise<void> {
   try {
-    await fetch(env.NOTIFY_WEBHOOK, {
+    await fetch(webhook, {
       method: 'POST',
       headers: { 'content-type': 'text/plain; charset=utf-8' },
       body: message,
@@ -255,31 +283,12 @@ export function unixNow(): number {
  * The model half of the categorization pipeline. No key means an import does
  * everything except step 5 of the cascade rather than failing —
  * categorization never blocks an import.
+ *
+ * Sign-up is open, so with a key set every account's imports can spend it.
  */
 function buildLlm(env: Env): ClassifyOptions | null {
   const config = loadConfig(env);
   return env.ANTHROPIC_API_KEY
     ? { apiKey: env.ANTHROPIC_API_KEY, batchSize: config.llmBatchSize, model: CLASSIFIER_MODEL }
     : null;
-}
-
-/**
- * One carrier in v1, created on first use. `created_at` no longer decides how
- * much history is pulled — the export decides that — so it is only a record
- * of when the carrier was first seen.
- */
-async function ensureCarrier(env: Env, now: number): Promise<void> {
-  const cardNo = carrierKey(env);
-  const existing = await getCarrierByCardNo(env.DB, cardNo);
-  if (existing) return;
-
-  const since = env.EINVOICE_CARRIER_SINCE;
-  const createdAt = isIsoDate(since ?? '') ? isoToUnix(since as string) : now;
-
-  await insertCarrier(env.DB, {
-    cardType: '3J0002',
-    cardNo,
-    label: 'owner',
-    createdAt,
-  });
 }

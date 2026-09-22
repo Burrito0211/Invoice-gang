@@ -1,5 +1,5 @@
 /**
- * Owner auth.
+ * Passwords and sessions. Sign-up and sign-in are in accounts.test.ts.
  *
  * These tests run in Node, which imposes no PBKDF2 iteration limit — so a
  * round-trip test passes happily with a hash the deployed Worker rejects.
@@ -84,31 +84,45 @@ describe('sessions', () => {
   const secret = 'a-test-signing-secret-long-enough';
   const now = 1_780_000_000;
 
-  it('accepts a token it just issued', async () => {
-    expect(await verifySession(secret, await createSession(secret, now), now)).toBe(true);
+  it('accepts a token it just issued, and says whose it is', async () => {
+    expect(await verifySession(secret, await createSession(secret, 7, now), now)).toBe(7);
   });
 
   it('rejects a token signed with a different secret', async () => {
-    // Rotating SESSION_SECRET is the documented way to log yourself out.
-    const token = await createSession(secret, now);
-    expect(await verifySession('a-different-secret-entirely', token, now)).toBe(false);
+    // Rotating SESSION_SECRET is the documented way to sign everyone out.
+    const token = await createSession(secret, 7, now);
+    expect(await verifySession('a-different-secret-entirely', token, now)).toBeNull();
   });
 
   it('rejects an expired token', async () => {
-    const token = await createSession(secret, now);
-    expect(await verifySession(secret, token, now + 60 * 60 * 24 * 365)).toBe(false);
+    const token = await createSession(secret, 7, now);
+    expect(await verifySession(secret, token, now + 60 * 60 * 24 * 365)).toBeNull();
   });
 
   it('rejects a tampered expiry', async () => {
     // The signature covers the expiry, so extending it invalidates the token.
-    const token = await createSession(secret, now);
+    const token = await createSession(secret, 7, now);
     const signature = token.slice(token.lastIndexOf('.') + 1);
-    const forged = `${now + 60 * 60 * 24 * 3650}.${signature}`;
-    expect(await verifySession(secret, forged, now)).toBe(false);
+    const forged = `7.${now + 60 * 60 * 24 * 3650}.${signature}`;
+    expect(await verifySession(secret, forged, now)).toBeNull();
+  });
+
+  it('rejects a token whose account id was changed', async () => {
+    // The first thing anyone holding a valid cookie of their own would try.
+    const token = await createSession(secret, 7, now);
+    const forged = token.replace(/^7\./, '1.');
+    expect(forged).not.toBe(token);
+    expect(await verifySession(secret, forged, now)).toBeNull();
+  });
+
+  it('rejects a token from the single-user build, which carried no account', async () => {
+    const [, expiry, signature] = (await createSession(secret, 7, now)).split('.');
+    expect(await verifySession(secret, `${expiry}.${signature}`, now)).toBeNull();
   });
 
   it('rejects a missing or malformed token', async () => {
-    expect(await verifySession(secret, null, now)).toBe(false);
-    expect(await verifySession(secret, 'no-dot-here', now)).toBe(false);
+    expect(await verifySession(secret, null, now)).toBeNull();
+    expect(await verifySession(secret, 'no-dot-here', now)).toBeNull();
+    expect(await verifySession(secret, 'a.b.c', now)).toBeNull();
   });
 });

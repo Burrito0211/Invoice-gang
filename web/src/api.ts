@@ -1,7 +1,8 @@
 /**
- * The dashboard's only channel to the server. There is no path by which the
- * client holds a credential — the session cookie is HttpOnly, and the carrier
- * code, App ID and Anthropic key are Worker secrets it never sees.
+ * The dashboard's only channel to the server. The client holds no credential
+ * it could leak: the session cookie is HttpOnly, the Anthropic key is a Worker
+ * secret, and an import token passes through exactly once — on the screen
+ * that created it, to be copied into the watch-folder script.
  */
 
 export interface ApiErrorBody {
@@ -38,9 +39,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  session: () => request<{ authenticated: boolean }>('/api/session'),
-  login: (password: string) =>
-    request<{ ok: true }>('/api/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  session: () => request<{ authenticated: boolean; username?: string }>('/api/session'),
+  login: (username: string, password: string) =>
+    request<SignedIn>('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  register: (username: string, password: string) =>
+    request<SignedIn>('/api/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: () => request<{ ok: true }>('/api/logout', { method: 'POST' }),
 
   summary: (from: string, to: string, group: 'category' | 'merchant' | 'month') =>
     request<SummaryResponse>(`/api/summary?from=${from}&to=${to}&group=${group}`),
@@ -58,6 +65,17 @@ export const api = {
   categories: () => request<{ categories: Category[] }>('/api/categories'),
 
   stats: () => request<StatsResponse>('/api/stats'),
+
+  // The budget is addressed by month, not by the dashboard's date range —
+  // it is a property of the month, and PUT answers with the same shape as
+  // GET so setting a figure shows what it implies without a second call.
+  budget: (month: string) => request<BudgetPace>(`/api/budget?month=${month}`),
+
+  setBudget: (month: string, amount: number) =>
+    request<BudgetPace>('/api/budget', {
+      method: 'PUT',
+      body: JSON.stringify({ month, amount }),
+    }),
 
   categorize: (scope: 'item' | 'merchant', key: string, category: string) =>
     request<{ items_updated: number }>('/api/categorize', {
@@ -99,9 +117,35 @@ export const api = {
     request<IncomeRow>('/api/income', { method: 'POST', body: JSON.stringify(entry) }),
 
   deleteIncome: (id: number) => request<{ ok: true }>(`/api/income/${id}`, { method: 'DELETE' }),
+
+  // The signed-in account. The import token comes back once, from the POST
+  // that creates it, and from nothing else.
+  account: () => request<AccountInfo>('/api/account'),
+
+  updateAccount: (patch: { notify_webhook: string | null }) =>
+    request<AccountInfo>('/api/account', { method: 'PUT', body: JSON.stringify(patch) }),
+
+  createImportToken: () =>
+    request<{ token: string; created_at: number }>('/api/account/import-token', { method: 'POST' }),
+
+  revokeImportToken: () =>
+    request<{ ok: true }>('/api/account/import-token', { method: 'DELETE' }),
 };
 
 // ------------------------------------------------------------------- shapes
+
+export interface SignedIn {
+  ok: true;
+  username: string;
+}
+
+export interface AccountInfo {
+  username: string;
+  created_at: number;
+  notify_webhook: string | null;
+  /** Never the token itself — only whether one exists, and when it was made and used. */
+  import_token: { created_at: number; last_used_at: number | null } | null;
+}
 
 export interface Category {
   id: number;
@@ -239,6 +283,29 @@ export interface PreviewInvoice {
 export interface ImportPreview {
   invoices: PreviewInvoice[];
   skipped_rows: { line: number; reason: string }[];
+}
+
+/**
+ * Everything the budget card shows. Amounts are NT$ integers, as everywhere.
+ * The nullable fields are null for exactly one reason each: no budget set, or
+ * no days left to spread the remainder over.
+ */
+export interface BudgetPace {
+  month: string;
+  amount: number | null;
+  spent: number;
+  remaining: number | null;
+  days_in_month: number;
+  days_elapsed: number;
+  days_left: number;
+  allowed_per_day: number | null;
+  pace_per_day: number;
+  remaining_per_day: number | null;
+  projected: number;
+  over_by: number | null;
+  status: 'unset' | 'over' | 'projected_over' | 'on_track';
+  /** The month whose row supplied the figure; different means carried forward. */
+  effective_from: string | null;
 }
 
 export interface ImportStatus {

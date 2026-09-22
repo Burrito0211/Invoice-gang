@@ -53,6 +53,11 @@ export interface PipelineDeps {
   now: () => Unix;
   /** Absent when there is no API key — the pass then stops after step 4. */
   llm: ClassifyOptions | null;
+  /**
+   * Whose items these are. Only that account's overrides apply to them; the
+   * rules and the cache are shared.
+   */
+  accountId: number;
 }
 
 export async function categorizeItems(
@@ -153,7 +158,7 @@ export async function categorizeItems(
  */
 export async function categorizePreview(
   items: CategorizableItem[],
-  deps: Pick<PipelineDeps, 'db' | 'kv'>,
+  deps: Pick<PipelineDeps, 'db' | 'kv' | 'accountId'>,
 ): Promise<Map<number, { categoryKey: string; source: CategorySource }>> {
   const out = new Map<number, { categoryKey: string; source: CategorySource }>();
   if (items.length === 0) return out;
@@ -190,7 +195,7 @@ async function loadRuleContext(
   categories: Category[],
 ): Promise<RuleContext> {
   const [overrideRows, itemRuleRows, ruleRows] = await Promise.all([
-    listOverrides(deps.db),
+    listOverrides(deps.db, deps.accountId),
     listItemRules(deps.db),
     listMerchantRules(deps.db),
   ]);

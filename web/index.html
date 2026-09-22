@@ -6,87 +6,143 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Invoice Gang</title>
+    <meta name="description" content="Personal accounting over Taiwan e-invoice records." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon.svg" />
-    <meta name="theme-color" content="#3d85c6" />
+    <meta name="theme-color" content="#1a2a6c" />
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      /*
+        Before the first paint, not in main.ts: the module runs after the page
+        has been drawn, so a stored dark choice would show up as a white flash
+        on every load. Only the saved choice is applied here — with nothing
+        stored the stylesheet follows the system on its own.
+      */
+      try {
+        var saved = localStorage.getItem('invoice-gang.theme');
+        if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
+      } catch (e) {
+        /* Private windows and blocked site data both throw; the default still applies. */
+      }
+    </script>
   </head>
   <body>
+    <!--
+      Static strings live here as `data-i18n` keys rather than as English, so a
+      phrase has exactly one home and no screen can end up half-translated.
+      `applyStaticStrings()` fills them on boot and again on every language
+      change. See web/src/i18n.ts.
+    -->
     <div id="login" class="login" hidden>
+      <!-- Sign-in and sign-up share this form; main.ts swaps the button and endpoint. -->
       <form id="login-form">
+        <div class="login-mark" aria-hidden="true">🧾</div>
         <h1>Invoice Gang</h1>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Password" />
-        <button type="submit">Sign in</button>
+        <p class="hint" data-i18n="login.tagline"></p>
+        <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" data-i18n-placeholder="login.username" required />
+        <input id="password" type="password" autocomplete="current-password" data-i18n-placeholder="login.password" required />
+        <p id="login-hint" class="hint" data-i18n="login.registerHint" hidden></p>
+        <button type="submit" id="login-submit"></button>
         <p id="login-error" class="error" hidden></p>
+        <button type="button" id="login-switch" class="linky"></button>
       </form>
     </div>
 
     <div id="app" hidden>
-      <header class="topbar">
-        <h1>Invoice Gang</h1>
-        <nav>
-          <button data-view="dashboard" class="active">Spend</button>
-          <button data-view="invoices">Invoices</button>
-          <button data-view="income">Income</button>
-          <button data-view="review">Review</button>
-          <button data-view="stats">Stats</button>
-        </nav>
-        <div class="range">
-          <input id="from" type="date" />
-          <input id="to" type="date" />
-          <label class="upload" for="csv">Import CSV</label>
-          <input id="csv" type="file" accept=".csv,text/csv" hidden />
+      <!-- Brand line and view tabs ride together in one sticky bar. -->
+      <div class="app-top">
+        <header class="app-header">
+          <span class="brand-mark" aria-hidden="true">🧾</span>
+          <h1 class="brand">Invoice Gang</h1>
+          <span class="brand-divider" aria-hidden="true">/</span>
+          <!-- The view you are on, filled by main.ts from the active tab. -->
+          <span class="brand-page" id="brand-page"></span>
+
+          <div class="header-actions">
+            <!-- Shows the language you would switch *to*, the way the MOF portal does. -->
+            <button id="lang" type="button" class="linky" data-i18n="lang.switch"></button>
+            <!-- The username; opens the account dialog. -->
+            <button id="account" type="button" class="linky" data-i18n-title="nav.account"></button>
+            <!-- Also in the account dialog, but signing out should never need finding. -->
+            <button id="sign-out-top" type="button" data-i18n="action.signOut"></button>
+            <!-- Names the theme it would switch to, for the same reason #lang does. -->
+            <button id="theme-toggle" type="button" class="theme-toggle" data-i18n-title="theme.toggle">
+              <span class="theme-toggle-icons" aria-hidden="true">
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <circle cx="12" cy="12" r="4.5" />
+                  <path d="M12 1.5v2M12 20.5v2M22.5 12h-2M3.5 12h-2M19.4 4.6l-1.4 1.4M6 18l-1.4 1.4M19.4 19.4L18 18M6 6L4.6 4.6" />
+                </svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 13.2A9 9 0 1 1 10.8 3a7.2 7.2 0 0 0 10.2 10.2z" />
+                </svg>
+              </span>
+              <span class="theme-toggle-label" id="theme-label"></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="app-bar">
+          <nav class="tabs">
+            <button data-view="dashboard" class="active" data-i18n="nav.spend"></button>
+            <button data-view="invoices" data-i18n="nav.invoices"></button>
+            <button data-view="income" data-i18n="nav.income"></button>
+            <button data-view="review" data-i18n="nav.review"></button>
+            <button data-view="stats" data-i18n="nav.stats"></button>
+          </nav>
+          <div class="range">
+            <input id="from" type="date" />
+            <input id="to" type="date" />
+            <label class="upload" id="csv-label" for="csv" data-i18n="action.importCsv"></label>
+            <input id="csv" type="file" accept=".csv,text/csv" hidden />
+            <!-- Opens the export guide: getting the file out of the portal is the one manual step. -->
+            <button id="csv-help" type="button" class="linky" data-i18n="action.csvHelp"></button>
+          </div>
         </div>
-      </header>
+      </div>
 
       <div id="stale" class="banner" hidden></div>
 
       <main>
         <section id="view-dashboard" class="view">
+          <div class="budget" id="budget"></div>
           <div class="totals" id="totals"></div>
           <div class="panels">
             <div class="panel">
-              <h2>By category</h2>
+              <h2 data-i18n="panel.byCategory"></h2>
               <div id="chart-category"></div>
             </div>
             <div class="panel">
-              <h2>By month</h2>
+              <h2 data-i18n="panel.byMonth"></h2>
               <div id="chart-month"></div>
             </div>
             <div class="panel">
-              <h2>Top merchants</h2>
+              <h2 data-i18n="panel.topMerchants"></h2>
               <div id="chart-merchant"></div>
             </div>
           </div>
         </section>
 
         <section id="view-invoices" class="view" hidden>
-          <input id="search" type="search" placeholder="Search merchants and item descriptions…" />
+          <input id="search" type="search" data-i18n-placeholder="search.placeholder" />
           <div id="invoice-list"></div>
-          <button id="load-more" hidden>Load more</button>
+          <button id="load-more" data-i18n="action.loadMore" hidden></button>
         </section>
 
         <section id="view-income" class="view" hidden>
-          <p class="hint">
-            The one place here you type a number by hand. Everything else is read
-            from your invoices; income has no invoice, so it is entered directly.
-          </p>
+          <p class="hint" data-i18n="income.hint"></p>
           <form id="income-form" class="income-form">
             <input id="income-date" type="date" required />
-            <input id="income-amount" type="number" min="1" step="1" placeholder="Amount NT$" required />
-            <input id="income-source" type="text" placeholder="Source, e.g. 薪資" required />
-            <input id="income-note" type="text" placeholder="Note (optional)" />
-            <button type="submit" class="upload">Add income</button>
+            <input id="income-amount" type="number" min="1" step="1" data-i18n-placeholder="income.amount" required />
+            <input id="income-source" type="text" data-i18n-placeholder="income.source" required />
+            <input id="income-note" type="text" data-i18n-placeholder="income.note" />
+            <button type="submit" class="upload" data-i18n="action.addIncome"></button>
           </form>
           <div id="income-list"></div>
         </section>
 
         <section id="view-review" class="view" hidden>
-          <p class="hint">
-            Uncategorized and low-confidence items, most expensive first — fixing these is the
-            fastest route to an accurate chart.
-          </p>
+          <p class="hint" data-i18n="review.hint"></p>
           <div id="review-list"></div>
         </section>
 
@@ -95,20 +151,113 @@
         </section>
       </main>
 
-      <dialog id="detail"><div id="detail-body"></div><button id="detail-close">Close</button></dialog>
+      <dialog id="detail">
+        <div id="detail-body"></div>
+        <div class="preview-actions">
+          <button id="detail-close" data-i18n="action.close"></button>
+        </div>
+      </dialog>
 
       <dialog id="preview">
         <div class="preview-head">
-          <h2>Review before importing</h2>
+          <h2 data-i18n="preview.title"></h2>
           <p id="preview-summary" class="muted"></p>
         </div>
         <div id="preview-body"></div>
         <div class="preview-actions">
-          <button id="preview-cancel">Cancel</button>
-          <button id="preview-confirm" class="upload">Import selected</button>
+          <button id="preview-cancel" data-i18n="action.cancel"></button>
+          <button id="preview-confirm" class="upload" data-i18n="action.importSelected"></button>
+        </div>
+      </dialog>
+
+      <!--
+        How to export the CSV from the carrier portal. The screenshots in
+        /guide/ had every personal detail replaced with placeholders in the page
+        before capture — keep it that way if they are ever retaken.
+      -->
+      <dialog id="guide">
+        <div class="preview-head">
+          <h2 data-i18n="guide.title"></h2>
+          <p class="muted" data-i18n="guide.intro"></p>
+        </div>
+        <ol class="guide-steps">
+          <li>
+            <p>
+              <span data-i18n="guide.step1"></span>
+              <a href="https://www.einvoice.nat.gov.tw/" target="_blank" rel="noopener noreferrer">www.einvoice.nat.gov.tw</a>
+            </p>
+            <img src="/guide/01-login-link.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step2"></p>
+            <img src="/guide/02-login-form.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step3"></p>
+            <img src="/guide/03-query-form.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step4"></p>
+            <img src="/guide/04-page-size.jpg" alt="" loading="lazy" />
+          </li>
+          <li>
+            <p data-i18n="guide.step5"></p>
+            <p class="guide-warning" data-i18n="guide.warning"></p>
+            <img src="/guide/05-download.jpg" alt="" loading="lazy" />
+          </li>
+        </ol>
+        <p class="hint" data-i18n="guide.then"></p>
+        <div class="preview-actions">
+          <button id="guide-close" type="button" data-i18n="action.close"></button>
+        </div>
+      </dialog>
+
+      <dialog id="account-dialog">
+        <div class="account-head">
+          <h2 id="account-name"></h2>
+          <p id="account-since" class="muted"></p>
+        </div>
+
+        <section class="account-section">
+          <h3 data-i18n="account.tokenTitle"></h3>
+          <p class="hint" data-i18n="account.tokenHint"></p>
+          <p id="token-status" class="muted"></p>
+          <code id="token-value" class="token" hidden></code>
+          <div class="account-actions">
+            <button id="token-create" type="button" class="upload"></button>
+            <button id="token-revoke" type="button" data-i18n="action.revoke" hidden></button>
+          </div>
+        </section>
+
+        <section class="account-section">
+          <h3 data-i18n="account.webhookTitle"></h3>
+          <p class="hint" data-i18n="account.webhookHint"></p>
+          <form id="webhook-form" class="account-actions">
+            <input id="webhook-url" type="url" inputmode="url" placeholder="https://ntfy.sh/…" />
+            <button type="submit" data-i18n="action.save"></button>
+          </form>
+        </section>
+
+        <div class="preview-actions">
+          <button id="sign-out" type="button" data-i18n="action.signOut"></button>
+          <button id="account-close" type="button" data-i18n="action.close"></button>
         </div>
       </dialog>
     </div>
+
+    <!--
+      Outside both screens, so the notice is on the sign-in page too — that is
+      where someone decides whether to hand this thing their purchase history.
+      The year in the copyright is filled by main.ts.
+    -->
+    <footer class="app-footer">
+      <span class="footer-mark" aria-hidden="true">🧾</span>
+      <span class="footer-copyright" id="footer-copyright"></span>
+      <span class="dot" aria-hidden="true">·</span>
+      <span data-i18n="footer.license"></span>
+      <span class="dot" aria-hidden="true">·</span>
+      <span data-i18n="footer.privacy"></span>
+    </footer>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

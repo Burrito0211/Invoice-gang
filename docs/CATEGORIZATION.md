@@ -99,9 +99,14 @@ SET category_id = :cat, category_source = 'override', categorized_at = :now
 WHERE item_key = :key;
 ```
 
-Overrides also poison the cache entry for that key — delete it from KV and the
-cache table, so the model's wrong answer is not still sitting there for a
-future rebuild.
+An override belongs to the account that wrote it: it outranks everything for
+that account's items and changes nobody else's. It does **not** delete the
+cache entry for its key any more. The cache is shared between accounts, the
+override already outranks it wherever it applies, and one person filing
+protein bars under `dining` is not evidence that the shared answer is wrong for
+everyone — deleting it would also let any account erase entries every other
+account relies on. A cache answer that is wrong for everyone is fixed with a
+rule.
 
 ## Seeding the rule table
 
